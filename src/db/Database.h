@@ -24,10 +24,10 @@ public:
     int Exists(IFunctionHandler* pH);
     
     // Lua 方法 - 全局数据（跨存档）
-    int SetGlobal(IFunctionHandler* pH);
-    int GetGlobal(IFunctionHandler* pH);
-    int DeleteGlobal(IFunctionHandler* pH);
-    int ExistsGlobal(IFunctionHandler* pH);
+    int SetG(IFunctionHandler* pH);
+    int GetG(IFunctionHandler* pH);
+    int DeleteG(IFunctionHandler* pH);
+    int ExistsG(IFunctionHandler* pH);
     
     int Flush(IFunctionHandler* pH);
     int Dump(IFunctionHandler* pH);

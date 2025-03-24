@@ -45,9 +45,7 @@ file(GLOB_RECURSE KCD2DB_SOURCES
         "src/*.cpp"
         "src/*.h"
 )
-add_library(kcd2db SHARED ${KCD2DB_SOURCES}
-        src/db/database.cpp
-        src/db/database.h)
+add_library(kcd2db SHARED ${KCD2DB_SOURCES})
 # Define LM_EXPORT to use libmem as a static library
 target_compile_definitions(kcd2db PRIVATE LM_EXPORT)
 

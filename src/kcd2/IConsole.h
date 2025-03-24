@@ -3,6 +3,8 @@
 #ifndef _ICONSOLE_H_
 #define _ICONSOLE_H_
 
+#include "common.h"
+
 struct SFunctor;
 
 struct ConsoleBind;

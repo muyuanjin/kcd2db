@@ -8,6 +8,7 @@
 #define KCD2_ENV_IMPORT
 #include "db/Database.h"
 #include "kcd2/env.h"
+#include "kcd2/IConsole.h"
 #include "log/log.h"
 
 std::optional<uintptr_t> find_env_addr()
@@ -15,7 +16,7 @@ std::optional<uintptr_t> find_env_addr()
     lm_module_t module;
     if (constexpr auto CLIENT_DLL = "WHGame.DLL"; !LM_FindModule(CLIENT_DLL, &module))
     {
-        Log("Failed to find module %s\n", CLIENT_DLL);
+        LogError("Failed to find module %s\n", CLIENT_DLL);
         return std::nullopt;
     }
 
@@ -23,13 +24,13 @@ std::optional<uintptr_t> find_env_addr()
     const auto scan_address = LM_SigScan(pattern, module.base, module.size);
     if (!scan_address)
     {
-        Log("Signature scan failed");
+        LogError("Signature scan failed");
         return std::nullopt;
     }
     int32_t rip_offset;
     if (!LM_ReadMemory(scan_address + 3, reinterpret_cast<lm_byte_t*>(&rip_offset), sizeof(rip_offset)))
     {
-        Log("Failed to read RIP offset");
+        LogError("Failed to read RIP offset");
         return std::nullopt;
     }
     // RIP 相对寻址公式：TargetAddress = RIP + Offset
@@ -47,19 +48,19 @@ std::optional<uintptr_t> find_env_addr()
 // 主要逻辑线程函数
 DWORD WINAPI main_thread(LPVOID)
 {
-    Log("Main thread started");
+    LogDebug("Main thread started");
     if (const auto env_addr = find_env_addr())
     {
         if (!env_addr.has_value())
         {
-            Log("Failed to find environment address");
+            LogError("Failed to find environment address");
             return 0;
         }
-        Log("Found environment address: 0x%llX", *env_addr);
+        LogDebug("Found environment address: 0x%llX", *env_addr);
         auto* env_ptr = reinterpret_cast<SSystemGlobalEnvironment*>(env_addr.value());
         while (env_ptr -> pGame == nullptr)
         {
-            Log("Waiting for game to be running...");
+            LogDebug("Waiting for game to be running...");
             Sleep(1000);
         }
         gEnv = *env_ptr;
@@ -67,17 +68,16 @@ DWORD WINAPI main_thread(LPVOID)
         gEnv->pConsole->ExecuteString("#dump(1)");
         gEnv->pScriptSystem->SetGlobalAny("TestDB", "gEnv");
         gEnv->pScriptSystem->SetGlobalValue("TestDB2", "gEnv2");
-        auto db = new Database(env_ptr);
-        Log("Database initialized");
+        const auto db = new Database(env_ptr);
+        LogInfo("Database initialized...%s", db);
         while (true)
         {
-            Log("Waiting for connection...%s", db);
             Sleep(10000);
         }
     }
     else
     {
-        Log("Failed to find environment address");
+        LogError("Failed to find environment address");
     }
     return 0;
 }
@@ -91,7 +91,7 @@ BOOL APIENTRY DllMain(const HMODULE hModule, const DWORD reason, LPVOID lpReserv
         CreateThread(nullptr, 0, [](LPVOID param) -> DWORD
         {
             Log_init();
-            Log("DLL attached");
+            LogDebug("DLL attached");
             // 创建主工作线程
             if (HANDLE hThread = CreateThread(nullptr, 0, main_thread, nullptr, 0, nullptr))
             {
@@ -99,7 +99,7 @@ BOOL APIENTRY DllMain(const HMODULE hModule, const DWORD reason, LPVOID lpReserv
             }
             else
             {
-                Log("Failed to create main thread");
+                LogError("Failed to create main thread");
             }
             return 0;
         }, nullptr, 0, nullptr);
