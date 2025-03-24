@@ -5,6 +5,8 @@
 #include <cassert>
 #include <libmem/libmem.h>
 
+#define KCD2_ENV_IMPORT
+#include "db/Database.h"
 #include "kcd2/env.h"
 #include "log/log.h"
 
@@ -48,8 +50,31 @@ DWORD WINAPI main_thread(LPVOID)
     Log("Main thread started");
     if (const auto env_addr = find_env_addr())
     {
+        if (!env_addr.has_value())
+        {
+            Log("Failed to find environment address");
+            return 0;
+        }
         Log("Found environment address: 0x%llX", *env_addr);
-        gEnv = *reinterpret_cast<SSystemGlobalEnvironment*>(*env_addr);
+        auto* env_ptr = reinterpret_cast<SSystemGlobalEnvironment*>(env_addr.value());
+        while (env_ptr -> pGame == nullptr)
+        {
+            Log("Waiting for game to be running...");
+            Sleep(1000);
+        }
+        gEnv = *env_ptr;
+        MessageBoxA(nullptr, "Hello, World!", "KCD2DB", MB_OK);
+        gEnv->pConsole->ExecuteString("#dump(1)");
+        gEnv->pScriptSystem->SetGlobalAny("TestDB", "gEnv");
+        gEnv->pScriptSystem->SetGlobalValue("TestDB2", "gEnv2");
+        auto db = new Database(env_ptr);
+        Log("Database initialized");
+        while (true)
+        {
+            Log("Waiting for connection...%s", db);
+            db->Test(nullptr);
+            Sleep(10000);
+        }
     }
     else
     {

@@ -3,6 +3,7 @@
 #pragma once
 
 #include <string>
+#include <cassert>
 
 #include "common.h"
 #include "functor.h"
@@ -282,6 +283,8 @@ struct IScriptSystem
 	//! Generates an OnLoadedScriptDump() for every loaded script.
 	virtual void DumpLoadedScripts() = 0;
 
+	virtual void Pad0()            = 0;
+
 	//! Creates a new IScriptTable table accessible to the scripts.
 	//! \return Pointer to the created object, with the reference count of 0.
 	virtual IScriptTable* CreateTable(bool bEmpty = false) = 0;
@@ -341,6 +344,9 @@ struct IScriptSystem
 
 	//! Push a parameter during a function call.
 	virtual void PushFuncParamAny(const ScriptAnyValue& any) = 0;
+
+	virtual void Pad1()            = 0;
+	virtual void Pad2()            = 0;
 
 	//! Set Global value.
 	virtual void SetGlobalAny(const char* sKey, const ScriptAnyValue& any) = 0;
@@ -613,6 +619,8 @@ struct IScriptTable
 
 	//! Dumps all table entries to the IScriptTableDumpSink interface.
 	virtual void Dump(IScriptTableDumpSink* p) = 0;
+
+	virtual void Pad() = 0;
 
 	//! Adds a C++ callback function to the table.
 	//! \note The function is a standard function that returns number of arguments and accept IFunctionHandler as argument.

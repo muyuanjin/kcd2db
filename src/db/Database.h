@@ -10,10 +10,14 @@
 class Database : public CScriptableBase
 {
 public:
-    Database(SSystemGlobalEnvironment* env)
-    {
-        Init(env->pScriptSystem,env->pSystem);
-    }
+     explicit Database(SSystemGlobalEnvironment* env);
+    virtual ~Database();
+    void Release() const { delete this; };
+    int Test(IFunctionHandler* pH);
+    int GetVar(IFunctionHandler* pH, char* key);
+    int SetVar(IFunctionHandler* pH, char* key, char* value);
+private:
+   void RegisterMethods();
 };
 
 
