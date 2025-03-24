@@ -63,7 +63,7 @@ DWORD WINAPI main_thread(LPVOID)
             Sleep(1000);
         }
         gEnv = *env_ptr;
-        MessageBoxA(nullptr, "Hello, World!", "KCD2DB", MB_OK);
+        // MessageBoxA(nullptr, "Hello, World!", "KCD2DB", MB_OK);
         gEnv->pConsole->ExecuteString("#dump(1)");
         gEnv->pScriptSystem->SetGlobalAny("TestDB", "gEnv");
         gEnv->pScriptSystem->SetGlobalValue("TestDB2", "gEnv2");
@@ -72,7 +72,6 @@ DWORD WINAPI main_thread(LPVOID)
         while (true)
         {
             Log("Waiting for connection...%s", db);
-            db->Test(nullptr);
             Sleep(10000);
         }
     }
