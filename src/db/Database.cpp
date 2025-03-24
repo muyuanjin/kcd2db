@@ -4,6 +4,7 @@
 
 #include "Database.h"
 
+#include <optional>
 #include <sstream>
 
 
@@ -22,7 +23,7 @@ Database::Database(SSystemGlobalEnvironment* env)
     {
         db.exec("CREATE TABLE IF NOT EXISTS Store ("
             "key TEXT NOT NULL,"
-            "savefile TEXT,"  // 存档ID，为空表示全局数据
+            "savefile TEXT," // 存档ID，为空表示全局数据
             "type INTEGER,"
             "value TEXT,"
             "PRIMARY KEY (key, savefile))");
@@ -46,32 +47,38 @@ void Database::OnSaveGame(ISaveGame* pSaveGame)
 {
     const std::string newSaveFileName = pSaveGame->GetFileName();
     const std::string oldSaveFileName = m_currentSaveGame;
-    
+
     Log("Save Game : %s (Previous: %s)", newSaveFileName.c_str(), oldSaveFileName.c_str());
-    
+
     // 如果是从旧存档保存到新存档，复制数据
-    if (!oldSaveFileName.empty() && oldSaveFileName != newSaveFileName) {
-        Log("Copying data from previous save '%s' to new save '%s'", 
+    if (!oldSaveFileName.empty() && oldSaveFileName != newSaveFileName)
+    {
+        Log("Copying data from previous save '%s' to new save '%s'",
             oldSaveFileName.c_str(), newSaveFileName.c_str());
-            
+
         ExecuteTransaction([&](SQLite::Database& db)
         {
             // 复制旧存档的数据到新存档（除非已在新存档中存在）
             db.exec("INSERT OR IGNORE INTO Store (key, savefile, type, value) "
-                    "SELECT key, '" + newSaveFileName + "', type, value "
-                    "FROM Store WHERE savefile = '" + oldSaveFileName + "'");
+                "SELECT key, '" + newSaveFileName + "', type, value "
+                "FROM Store WHERE savefile = '" + oldSaveFileName + "'");
         });
-        
+
         // 重新加载数据以反映变化
         m_currentSaveGame = newSaveFileName;
         LoadFromDB();
-    } else {
+    }
+    else
+    {
         // 更新当前存档文件名
         m_currentSaveGame = newSaveFileName;
-        
+
         // 标记数据有变动，需要保存
-        MarkDataChanged();
-        
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            MarkDataChanged();
+        }
+
         // 保存当前数据到数据库
         SaveToDB();
     }
@@ -81,10 +88,10 @@ void Database::OnLoadGame(ILoadGame* pLoadGame)
 {
     const std::string loadFileName = pLoadGame->GetFileName();
     Log("Load Game : %s", loadFileName.c_str());
-    
+
     // 更新当前存档文件名
     m_currentSaveGame = loadFileName;
-    
+
     // 重新加载数据
     LoadFromDB();
 }
@@ -92,105 +99,86 @@ void Database::OnLoadGame(ILoadGame* pLoadGame)
 // 数据变化检测
 bool Database::HasDataChanged() const
 {
-    std::lock_guard lock(m_mutex);
+    std::lock_guard<std::mutex> lock(m_mutex);
     return m_dataChanged;
 }
 
 // 标记数据变更
 void Database::MarkDataChanged()
 {
-    std::lock_guard lock(m_mutex);
+    // 移除锁，因为此方法总是在已经获取m_mutex锁的上下文中调用
     m_dataChanged = true;
 }
 
 void Database::LoadFromDB()
 {
-    // 清空当前缓存
-    m_cache.clear();
-    
-    std::lock_guard lock(m_mutex);
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_saveCache.clear();
+    m_globalCache.clear();
     int count = 0;
-    
-    // 加载全局数据（savefile为空的数据）
-    SQLite::Statement queryGlobal(*m_db, "SELECT key, type, value FROM Store WHERE savefile = ''");
-    while (queryGlobal.executeStep())
+
+    auto LoadData = [&](const std::string& query, auto&& bindParams, bool isGlobal)
     {
-        std::string key = queryGlobal.getColumn(0).getText();
-        const int type = queryGlobal.getColumn(1).getInt();
-        std::string value = queryGlobal.getColumn(2).getText();
+        SQLite::Statement stmt(*m_db, query);
+        bindParams(stmt);
 
-        Log("Loading global key: %s, type: %d, value: %s", key.c_str(), type, value.c_str());
+        auto& targetCache = isGlobal ? m_globalCache : m_saveCache;
 
-        ScriptAnyValue any;
-        switch (type)
+        while (stmt.executeStep())
         {
-        case ANY_TBOOLEAN:
-            any.type = ANY_TBOOLEAN;
-            any.b = std::stoi(value) != 0;
-            break;
-        case ANY_TNUMBER:
-            any.type = ANY_TNUMBER;
-            any.number = std::stod(value);
-            break;
-        case ANY_TSTRING:
-            any.type = ANY_TSTRING;
-            any.str = _strdup(value.c_str());
-            break;
-        default:
-            continue;
-        }
+            const auto& key = stmt.getColumn(0).getText();
+            const int type = stmt.getColumn(1).getInt();
+            const std::string value = stmt.getColumn(2).getText();
 
-        // 使用"global:"前缀存储全局数据在内存中
-        std::string globalKey = "global:" + key;
-        m_cache[globalKey] = any;
-        count++;
-    }
-    
-    // 如果有当前存档，加载存档相关数据
+            if (auto any = ParseAnyValue(type, value))
+            {
+                targetCache[key] = *any;
+                Log("Loading %s key: %s, type: %d, value: %s",
+                    (isGlobal ? "global" : "save-specific"),
+                    key, type, value.c_str());
+                count++;
+            }
+        }
+    };
+
+    // Load global data
+    LoadData("SELECT key, type, value FROM Store WHERE savefile = ''",
+             [](auto&)
+             {
+             }, true);
+
+    // Load save data
     if (!m_currentSaveGame.empty())
     {
-        SQLite::Statement querySave(*m_db, "SELECT key, type, value FROM Store WHERE savefile = ?");
-        querySave.bind(1, m_currentSaveGame);
-        
-        while (querySave.executeStep())
-        {
-            std::string key = querySave.getColumn(0).getText();
-            const int type = querySave.getColumn(1).getInt();
-            std::string value = querySave.getColumn(2).getText();
-
-            Log("Loading save-specific key: %s, type: %d, value: %s", key.c_str(), type, value.c_str());
-
-            ScriptAnyValue any;
-            switch (type)
-            {
-            case ANY_TBOOLEAN:
-                any.type = ANY_TBOOLEAN;
-                any.b = std::stoi(value) != 0;
-                break;
-            case ANY_TNUMBER:
-                any.type = ANY_TNUMBER;
-                any.number = std::stod(value);
-                break;
-            case ANY_TSTRING:
-                any.type = ANY_TSTRING;
-                any.str = _strdup(value.c_str());
-                break;
-            default:
-                continue;
-            }
-
-            // 存档特定数据直接使用键名存储在内存中
-            m_cache[key] = any;
-            count++;
-        }
+        LoadData("SELECT key, type, value FROM Store WHERE savefile = ?",
+                 [&](auto& stmt) { stmt.bind(1, m_currentSaveGame); },
+                 false);
     }
-    
-    std::ostringstream oss;
-    oss << "Loaded " << count << " entries from database.";
-    gEnv->pConsole->PrintLine(oss.str().c_str());
-    
-    // 重置数据变更标记
+
+    gEnv->pConsole->PrintLine(("Loaded " + std::to_string(count) + " entries from database.").c_str());
     m_dataChanged = false;
+}
+
+std::optional<ScriptAnyValue> Database::ParseAnyValue(int type, const std::string& value)
+{
+    ScriptAnyValue any;
+    any.type = static_cast<ScriptAnyType>(type);
+
+    switch (type)
+    {
+    case ANY_TBOOLEAN:
+        any.b = std::stoi(value) != 0;
+        break;
+    case ANY_TNUMBER:
+        any.number = std::stod(value);
+        break;
+    case ANY_TSTRING:
+        any.str = std::unique_ptr<char[]>(_strdup(value.c_str())).release();
+        break;
+    default:
+        return std::nullopt;
+    }
+    return any;
 }
 
 // 原子化操作
@@ -214,10 +202,17 @@ int Database::Set(IFunctionHandler* pH)
         return pH->EndFunction(false);
     }
 
+    // 检查是否有有效的存档加载，如果没有，则无法使用Set方法
+    if (m_currentSaveGame.empty())
+    {
+        Log("Error: Cannot use Set() when no save game is loaded");
+        return pH->EndFunction(false);
+    }
+
     const std::string key = keyParam ? keyParam : "";
 
     std::lock_guard lock(m_mutex);
-    m_cache[key] = value;
+    m_saveCache[key] = value;
     MarkDataChanged();
 
     return pH->EndFunction(true);
@@ -232,11 +227,18 @@ int Database::Get(IFunctionHandler* pH)
         return pH->EndFunction();
     }
 
+    // 检查是否有有效的存档加载，如果没有，则无法使用Get方法
+    if (m_currentSaveGame.empty())
+    {
+        Log("Error: Cannot use Get() when no save game is loaded");
+        return pH->EndFunction();
+    }
+
     const std::string key = keyParam ? keyParam : "";
-    
-    std::lock_guard lock(m_mutex);
-    const auto it = m_cache.find(key);
-    if (it == m_cache.end())
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    const auto it = m_saveCache.find(key);
+    if (it == m_saveCache.end())
     {
         return pH->EndFunction();
     }
@@ -262,12 +264,20 @@ int Database::Delete(IFunctionHandler* pH)
     {
         return pH->EndFunction(false);
     }
-    
+
+    // 检查是否有有效的存档加载，如果没有，则无法使用Delete方法
+    if (m_currentSaveGame.empty())
+    {
+        Log("Error: Cannot use Delete() when no save game is loaded");
+        return pH->EndFunction(false);
+    }
+
     std::string key = keyParam ? keyParam : "";
 
-    std::lock_guard lock(m_mutex);
-    bool result = m_cache.erase(key) > 0;
-    if (result) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    bool result = m_saveCache.erase(key) > 0;
+    if (result)
+    {
         MarkDataChanged();
     }
     return pH->EndFunction(result);
@@ -281,11 +291,18 @@ int Database::Exists(IFunctionHandler* pH)
     {
         return pH->EndFunction(false);
     }
-    
+
+    // 检查是否有有效的存档加载，如果没有，则无法使用Exists方法
+    if (m_currentSaveGame.empty())
+    {
+        Log("Error: Cannot use Exists() when no save game is loaded");
+        return pH->EndFunction(false);
+    }
+
     std::string key = keyParam ? keyParam : "";
 
-    std::lock_guard lock(m_mutex);
-    return pH->EndFunction(m_cache.find(key) != m_cache.end());
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return pH->EndFunction(m_saveCache.find(key) != m_saveCache.end());
 }
 
 // 全局数据设置
@@ -302,10 +319,9 @@ int Database::SetGlobal(IFunctionHandler* pH)
     }
 
     std::string key = keyParam ? keyParam : "";
-    std::string globalKey = "global:" + key;
-    
-    std::lock_guard lock(m_mutex);
-    m_cache[globalKey] = value;
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_globalCache[key] = value;
     MarkDataChanged();
 
     return pH->EndFunction(true);
@@ -319,13 +335,12 @@ int Database::GetGlobal(IFunctionHandler* pH)
     {
         return pH->EndFunction();
     }
-    
+
     std::string key = keyParam ? keyParam : "";
-    std::string globalKey = "global:" + key;
-    
-    std::lock_guard lock(m_mutex);
-    const auto it = m_cache.find(globalKey);
-    if (it == m_cache.end())
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    const auto it = m_globalCache.find(key);
+    if (it == m_globalCache.end())
     {
         return pH->EndFunction();
     }
@@ -353,11 +368,11 @@ int Database::DeleteGlobal(IFunctionHandler* pH)
     }
 
     std::string key = keyParam ? keyParam : "";
-    std::string globalKey = "global:" + key;
-    
-    std::lock_guard lock(m_mutex);
-    bool result = m_cache.erase(globalKey) > 0;
-    if (result) {
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    bool result = m_globalCache.erase(key) > 0;
+    if (result)
+    {
         MarkDataChanged();
     }
     return pH->EndFunction(result);
@@ -373,110 +388,121 @@ int Database::ExistsGlobal(IFunctionHandler* pH)
     }
 
     std::string key = keyParam ? keyParam : "";
-    std::string globalKey = "global:" + key;
-    
-    std::lock_guard lock(m_mutex);
-    return pH->EndFunction(m_cache.find(globalKey) != m_cache.end());
+
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return pH->EndFunction(m_globalCache.find(key) != m_globalCache.end());
 }
 
 int Database::Flush(IFunctionHandler* pH)
 {
-    std::lock_guard lock(m_mutex);
+    std::lock_guard<std::mutex> lock(m_mutex);
     SaveToDB();
     return pH->EndFunction();
 }
 
 int Database::Dump(IFunctionHandler* pH)
 {
-    std::lock_guard lock(m_mutex);
-    for (const auto& [key, value] : m_cache)
-    {
-        switch (value.type)
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    // Helper function to dump a specific cache
+    auto dumpCache = [&](const auto& cache, const char* cacheType) {
+        gEnv->pConsole->PrintLine(("--- " + std::string(cacheType) + " Data ---").c_str());
+        for (const auto& [key, value] : cache)
         {
-        case ANY_TBOOLEAN:
+            switch (value.type)
             {
-                std::ostringstream oss;
-                oss << "Boolean Value ["<< key <<"] : " << (value.b ? "true" : "false");
-                gEnv->pConsole->PrintLine(oss.str().c_str());
+            case ANY_TBOOLEAN:
+                {
+                    std::ostringstream oss;
+                    oss << cacheType << " Boolean Value [" << key << "] : " << (value.b ? "true" : "false");
+                    gEnv->pConsole->PrintLine(oss.str().c_str());
+                }
+                break;
+            case ANY_TNUMBER:
+                {
+                    std::ostringstream oss;
+                    oss << cacheType << " Number Value [" << key << "] : " << value.number;
+                    gEnv->pConsole->PrintLine(oss.str().c_str());
+                }
+                break;
+            case ANY_TSTRING:
+                {
+                    std::ostringstream oss;
+                    oss << cacheType << " String Value [" << key << "] : " << (value.str ? value.str : "");
+                    gEnv->pConsole->PrintLine(oss.str().c_str());
+                }
+                break;
+            default:
+                continue;
             }
-            break;
-        case ANY_TNUMBER:
-            {
-                std::ostringstream oss;
-                oss << "Number Value ["<< key <<"] : " << value.number;
-                gEnv->pConsole->PrintLine(oss.str().c_str());
-            }
-            break;
-        case ANY_TSTRING:
-            {
-                std::ostringstream oss;
-                oss << "String Value ["<< key <<"] : " << (value.str ? value.str : "");
-                gEnv->pConsole->PrintLine(oss.str().c_str());
-            }
-            break;
-        default:
-            continue;
         }
-    }
+    };
+    
+    // Dump global data
+    dumpCache(m_globalCache, "Global");
+    
+    // Dump save-specific data
+    dumpCache(m_saveCache, "Save");
+    
     return pH->EndFunction();
 }
 
 // 持久化到数据库
 void Database::SaveToDB()
 {
-    if (!m_dataChanged) {
+    if (!m_dataChanged)
+    {
         Log("No data changes detected, skipping database save");
         return;
     }
-    
+
     int savedCount = 0;
-    
+
     ExecuteTransaction([&](SQLite::Database& db)
     {
         // 保存全局数据和当前存档数据
-        SQLite::Statement insert(db, 
-            "INSERT OR REPLACE INTO Store (key, savefile, type, value) VALUES (?, ?, ?, ?)");
+        SQLite::Statement insert(db,
+                                "INSERT OR REPLACE INTO Store (key, savefile, type, value) VALUES (?, ?, ?, ?)");
 
-        for (const auto& [key, value] : m_cache)
-        {
-            std::string actualKey;
-            std::string saveId;
-            
-            // 判断是否是全局数据
-            if (key.compare(0, 7, "global:") == 0) {
-                actualKey = key.substr(7);  // 去掉前缀
-                saveId = "";                // 全局数据的savefile为空
-            } else {
-                actualKey = key;            // 存档数据直接使用键名
-                saveId = m_currentSaveGame; // 当前存档ID
-            }
-            
-            insert.bind(1, actualKey);
-            insert.bind(2, saveId);
-            insert.bind(3, value.type);
-
-            switch (value.type)
+        // Helper function to save a specific cache
+        auto saveCache = [&](const auto& cache, const std::string& saveId) {
+            for (const auto& [key, value] : cache)
             {
-            case ANY_TBOOLEAN:
-                insert.bind(4, value.b ? "1" : "0");
-                break;
-            case ANY_TNUMBER:
-                insert.bind(4, std::to_string(value.number));
-                break;
-            case ANY_TSTRING:
-                insert.bind(4, value.str ? value.str : "");
-                break;
-            default: continue;
-            }
+                insert.bind(1, key);
+                insert.bind(2, saveId);
+                insert.bind(3, value.type);
 
-            insert.exec();
-            insert.reset();
-            savedCount++;
+                switch (value.type)
+                {
+                case ANY_TBOOLEAN:
+                    insert.bind(4, value.b ? "1" : "0");
+                    break;
+                case ANY_TNUMBER:
+                    insert.bind(4, std::to_string(value.number));
+                    break;
+                case ANY_TSTRING:
+                    insert.bind(4, value.str ? value.str : "");
+                    break;
+                default: continue;
+                }
+
+                insert.exec();
+                insert.reset();
+                savedCount++;
+            }
+        };
+
+        // Save global data (empty savefile)
+        saveCache(m_globalCache, "");
+
+        // Save save-specific data
+        if (!m_currentSaveGame.empty()) {
+            saveCache(m_saveCache, m_currentSaveGame);
         }
     });
-    
+
     Log("Saved %d entries to database", savedCount);
-    
+
     // 重置数据变更标记
     m_dataChanged = false;
 }
@@ -492,13 +518,13 @@ void Database::RegisterMethods()
     SCRIPT_REG_TEMPLFUNC(Get, "key");
     SCRIPT_REG_TEMPLFUNC(Delete, "key");
     SCRIPT_REG_TEMPLFUNC(Exists, "key");
-    
+
     // 全局数据方法（跨存档）
     SCRIPT_REG_TEMPLFUNC(SetGlobal, "key, value");
     SCRIPT_REG_TEMPLFUNC(GetGlobal, "key");
     SCRIPT_REG_TEMPLFUNC(DeleteGlobal, "key");
     SCRIPT_REG_TEMPLFUNC(ExistsGlobal, "key");
-    
+
     // 工具方法
     SCRIPT_REG_TEMPLFUNC(Flush, "");
     SCRIPT_REG_TEMPLFUNC(Dump, "");
