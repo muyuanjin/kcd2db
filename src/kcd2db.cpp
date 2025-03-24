@@ -45,8 +45,7 @@ std::optional<uintptr_t> find_env_addr()
     return console_addr - 0xA8;
 }
 
-// 主要逻辑线程函数
-DWORD WINAPI main_thread(LPVOID)
+void start()
 {
     LogDebug("Main thread started");
     if (const auto env_addr = find_env_addr())
@@ -54,20 +53,16 @@ DWORD WINAPI main_thread(LPVOID)
         if (!env_addr.has_value())
         {
             LogError("Failed to find environment address");
-            return 0;
+            return;
         }
         LogDebug("Found environment address: 0x%llX", *env_addr);
         auto* env_ptr = reinterpret_cast<SSystemGlobalEnvironment*>(env_addr.value());
-        while (env_ptr -> pGame == nullptr)
+        while (env_ptr->pGame == nullptr)
         {
             LogDebug("Waiting for game to be running...");
             Sleep(1000);
         }
         gEnv = *env_ptr;
-        // MessageBoxA(nullptr, "Hello, World!", "KCD2DB", MB_OK);
-        gEnv->pConsole->ExecuteString("#dump(1)");
-        gEnv->pScriptSystem->SetGlobalAny("TestDB", "gEnv");
-        gEnv->pScriptSystem->SetGlobalValue("TestDB2", "gEnv2");
         const auto db = new Database(env_ptr);
         LogInfo("Database initialized...%s", db);
         while (true)
@@ -78,6 +73,25 @@ DWORD WINAPI main_thread(LPVOID)
     else
     {
         LogError("Failed to find environment address");
+    }
+}
+
+// 主要逻辑线程函数
+DWORD WINAPI main_thread(LPVOID)
+{
+    try
+    {
+        start();
+    }
+    catch (const std::exception& e)
+    {
+        LogError("Flush: Error during flush: %s", e.what());
+        return 1;
+    }
+    catch (...)
+    {
+        LogError("Flush: Unknown error during flush");
+        return 1;
     }
     return 0;
 }

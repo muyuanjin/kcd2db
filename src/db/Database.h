@@ -20,14 +20,14 @@ public:
     // Lua 方法 - 存档关联数据
     int Set(IFunctionHandler* pH);
     int Get(IFunctionHandler* pH);
-    int Delete(IFunctionHandler* pH);
-    int Exists(IFunctionHandler* pH);
+    int Del(IFunctionHandler* pH);
+    int Exi(IFunctionHandler* pH);
     
     // Lua 方法 - 全局数据（跨存档）
     int SetG(IFunctionHandler* pH);
     int GetG(IFunctionHandler* pH);
-    int DeleteG(IFunctionHandler* pH);
-    int ExistsG(IFunctionHandler* pH);
+    int DelG(IFunctionHandler* pH);
+    int ExiG(IFunctionHandler* pH);
     
     int Flush(IFunctionHandler* pH);
     int Dump(IFunctionHandler* pH);
@@ -48,6 +48,7 @@ private:
     void RegisterMethods();
     void LoadFromDB();
     static std::optional<ScriptAnyValue> ParseAnyValue(int type, const std::string& value);
+    static std::optional<std::string> SerializeAnyValue(const ScriptAnyValue& any);
     void SaveToDB();
     void ExecuteTransaction(const std::function<void(SQLite::Database&)>& task) const;
     
