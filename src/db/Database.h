@@ -16,11 +16,18 @@ public:
     explicit Database(SSystemGlobalEnvironment* env);
     ~Database() override;
 
-    // Lua 方法
+    // Lua 方法 - 存档关联数据
     int Set(IFunctionHandler* pH);
     int Get(IFunctionHandler* pH);
     int Delete(IFunctionHandler* pH);
     int Exists(IFunctionHandler* pH);
+    
+    // Lua 方法 - 全局数据（跨存档）
+    int SetGlobal(IFunctionHandler* pH);
+    int GetGlobal(IFunctionHandler* pH);
+    int DeleteGlobal(IFunctionHandler* pH);
+    int ExistsGlobal(IFunctionHandler* pH);
+    
     int Flush(IFunctionHandler* pH);
     int Dump(IFunctionHandler* pH);
     // IGameFrameworkListener
@@ -33,13 +40,22 @@ public:
     void OnSavegameFileLoadedInMemory(const char* pLevelName) override{}
     void OnForceLoadingWithFlash()  override                          {}
 
+    // 数据变化检测
+    bool HasDataChanged() const;
+    
 private:
     void RegisterMethods();
     void LoadFromDB();
     void SaveToDB();
     void ExecuteTransaction(const std::function<void(SQLite::Database&)>& task) const;
+    
+    // 数据变更标记
+    void MarkDataChanged();
+    
     std::mutex m_mutex;
-    std::unordered_map<std::string, ScriptAnyValue> m_cache;
-    std::unique_ptr<SQLite::Database> m_db;
-    std::string m_dbPath;
+    std::unordered_map<std::string, ScriptAnyValue> m_cache; // 内存缓存
+    std::unique_ptr<SQLite::Database> m_db;                  // 数据库连接
+    std::string m_dbPath;                                    // 数据库路径
+    std::string m_currentSaveGame;                           // 当前存档文件路径
+    bool m_dataChanged;                                      // 数据是否被修改
 };
