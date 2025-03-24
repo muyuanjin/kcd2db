@@ -331,11 +331,11 @@ public:
 
 	inline int AddRef()
 	{
-		return CryInterlockedIncrement(&m_cnt);
+		return _InterlockedIncrement((volatile LONG*)&m_cnt);
 	}
 	inline int Release()
 	{
-		const int nCount = CryInterlockedDecrement(&m_cnt);
+		const int nCount = _InterlockedDecrement((volatile LONG*)&m_cnt);
 //		assert(nCount >= 0);
 		if (nCount == 0)
 		{
@@ -377,12 +377,12 @@ public:
 
 	virtual void AddRef()
 	{
-		CryInterlockedIncrement(&m_nRefCounter);
+		_InterlockedIncrement((volatile LONG*)&m_nRefCounter);
 	}
 
 	virtual void Release()
 	{
-		const int nCount = CryInterlockedDecrement(&m_nRefCounter);
+		const int nCount = _InterlockedDecrement((volatile LONG*)&m_nRefCounter);
 //		assert(nCount >= 0);
 		if (nCount == 0)
 		{

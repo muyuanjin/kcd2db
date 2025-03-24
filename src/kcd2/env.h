@@ -1,6 +1,6 @@
 #ifndef ENV_H
 #define ENV_H
-#include "console.h"
+#include "IConsole.h"
 
 struct IScriptSystem;
 struct ISystem;
@@ -59,6 +59,11 @@ struct SSystemGlobalEnvironment
 };
 
 
+#ifndef KCD2_ENV_IMPORT
+#define KCD2_ENV_IMPORT
+extern SSystemGlobalEnvironment gEnv;
+#else
 SSystemGlobalEnvironment gEnv;
+#endif
 
 #endif //ENV_H

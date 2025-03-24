@@ -5,7 +5,7 @@
 #include <vector>
 #include <windows.h>
 
-auto Filename = "./kcd2db.log";
+auto Filename = "kcd2db.log";
 HANDLE ConsoleHandle = nullptr;
 
 bool CheckForConsoleArg() {

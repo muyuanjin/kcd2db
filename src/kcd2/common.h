@@ -2,6 +2,9 @@
 
 #pragma once
 
+#include <windows.h>
+#include <cmath>
+
 #define ILINE inline
 #define f32 float
 #define f64 double
@@ -102,4 +105,3 @@ struct Ang3 : public Vec3
 	Ang3() : Vec3() {}
 	Ang3(float x, float y, float z) : Vec3(x, y, z) {}
 };
-
