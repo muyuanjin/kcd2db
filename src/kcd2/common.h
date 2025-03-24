@@ -4,6 +4,7 @@
 
 #include <windows.h>
 #include <cmath>
+#include <cstdint>
 
 #define ILINE inline
 #define STRUCT_INFO

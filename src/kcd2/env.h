@@ -1,8 +1,8 @@
 #ifndef ENV_H
 #define ENV_H
-#include "IConsole.h"
-#include "IGame.h"
 
+struct IGame;
+struct IConsole;
 struct IScriptSystem;
 struct ISystem;
 struct IEntitySystem;

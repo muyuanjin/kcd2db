@@ -186,13 +186,9 @@ public:
 	virtual ~CScriptableBase() { Done(); };
 	virtual void Init(IScriptSystem* pSS, ISystem* pSystem, const int nParamIdOffset = 0)
 	{
-		Log("CScriptableBase::Init");
 		m_pSS = pSS;
-		Log("CScriptableBase::Init 111");
 		m_pMethodsTable = m_pSS->CreateTable();
-		Log("CScriptableBase::Init 222");
 		m_pMethodsTable->AddRef();
-		Log("CScriptableBase::Init 333");
 		m_nParamIdOffset = nParamIdOffset;
 	}
 	void Done()
@@ -248,12 +244,10 @@ protected:
 		typedef Callee* Callee_pointer;
 		if (m_pMethodsTable)
 		{
-			Log("Registering template function 111");
 			Callee_pointer pCalleePtr = &callee;
 			unsigned char pBuffer[sizeof(Callee_pointer) + sizeof(func)];
 			memcpy(pBuffer, &pCalleePtr, sizeof(Callee_pointer));
 			memcpy(pBuffer + sizeof(Callee_pointer), &func, sizeof(func));
-			Log("Registering template function 222");
 			IScriptTable::SUserFunctionDesc fd;
 			fd.sGlobalName = m_sGlobalName;
 			fd.sFunctionName = sFuncName;
@@ -262,7 +256,6 @@ protected:
 			fd.nDataSize = sizeof(Callee_pointer) + sizeof(func);
 			fd.pDataBuffer = pBuffer;
 			fd.nParamIdOffset = m_nParamIdOffset;
-			Log("Registering template function %s", sFuncName);
 			m_pMethodsTable->AddFunction(fd);
 		}
 	}
