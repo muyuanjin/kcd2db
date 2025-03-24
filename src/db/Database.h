@@ -6,11 +6,12 @@
 #include <functional>
 
 #include "../kcd2/IScriptSystem.h"
+#include "../kcd2/IGameFramework.h"
 #include <unordered_map>
 #include <mutex>
 #include <SQLiteCpp/SQLiteCpp.h>
 
-class Database final : public CScriptableBase {
+class Database final : public CScriptableBase , public IGameFrameworkListener {
 public:
     explicit Database(SSystemGlobalEnvironment* env);
     ~Database() override;
@@ -22,6 +23,16 @@ public:
     int Exists(IFunctionHandler* pH);
     int Flush(IFunctionHandler* pH);
     int Dump(IFunctionHandler* pH);
+    // IGameFrameworkListener
+    void OnPostUpdate(float fDeltaTime) override {}
+    void OnSaveGame(ISaveGame* pSaveGame) override;
+    void OnLoadGame(ILoadGame* pLoadGame) override;
+    void OnLevelEnd(const char* nextLevel)  override {}
+    void OnActionEvent(const SActionEvent& event) override {}
+    void OnPreRender() override{}
+    void OnSavegameFileLoadedInMemory(const char* pLevelName) override{}
+    void OnForceLoadingWithFlash()  override                          {}
+
 private:
     void RegisterMethods();
     void LoadFromDB();
