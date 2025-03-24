@@ -28,11 +28,22 @@ Database::Database( SSystemGlobalEnvironment* env)
 
     LoadFromDB();
     RegisterMethods();
+    env->pGame->GetIGameFramework()->RegisterListener(this, "LuaDB", FRAMEWORKLISTENERPRIORITY_DEFAULT);
 }
 
 Database::~Database()
 {
     SaveToDB();
+}
+
+void Database::OnSaveGame(ISaveGame* pSaveGame)
+{
+    Log("Save Game : %s",pSaveGame->GetFileName());
+}
+
+void Database::OnLoadGame(ILoadGame* pLoadGame)
+{
+    Log("Load Game : %s",pLoadGame->GetFileName());
 }
 
 void Database::LoadFromDB()
