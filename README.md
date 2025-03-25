@@ -56,6 +56,9 @@ LuaDB.Dump()
 
 ## Supported Data Types
 
+- Key : must be a string
+- Value : can be a boolean, number, or string
+
 | Type    | Storage Format         | Notes                   |
 |---------|------------------------|-------------------------|
 | Boolean | 0/1                    | 0 represents false      |
@@ -77,7 +80,8 @@ LuaDB.SetG("ending_unlocked", "bad_ending")
 LuaDB.Dump()
 ```
 ## Build
-- Build with Cmake and MSVC 2022
+- `cmake -B build -G "Visual Studio 17 2022" -DSQLITECPP_RUN_CPPLINT=OFF`
+- `cmake --build build --config Release`
 
 ## Debugging
 - Uses SQLite3 database named `kcd2db.db` in game root
@@ -147,6 +151,9 @@ LuaDB.Dump()
 
 ## 数据类型支持
 
+- Key : 必须是字符串
+- Value : 可以是布尔值、数字或字符串
+
 | 类型  | 存储格式      | 说明        |
 |-----|-----------|-----------|
 | 布尔值 | 0/1       | 0表示false  |
@@ -169,7 +176,8 @@ LuaDB.Dump()
 ```
 
 ## 构建
-- 使用 Cmake 和 MSVC 2022 构建
+- `cmake -B build -G "Visual Studio 17 2022" -DSQLITECPP_RUN_CPPLINT=OFF`
+- `cmake --build build --config Release`
 
 ## 调试
 - 使用位于游戏根目录下名为 `kcd2db.db` 的 SQLite3 数据库
