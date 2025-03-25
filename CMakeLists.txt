@@ -12,11 +12,8 @@ endif()
 if(NOT WIN32 OR NOT MSVC)
     message(FATAL_ERROR "This project only supports Windows and MSVC")
 endif()
-
-if (MSVC)
-    # 设置为静态多线程运行时库（Release用MT，Debug用MTd）
-    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-endif()
+# 设置为静态多线程运行时库（Release用MT，Debug用MTd）
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 set(CMAKE_SYSTEM_NAME Windows)
 set(CMAKE_SYSTEM_PROCESSOR x86_64)
@@ -29,6 +26,7 @@ FetchContent_Declare(libmem-config URL "https://raw.githubusercontent.com/rdbo/l
 FetchContent_MakeAvailable(libmem-config)
 set(CMAKE_PREFIX_PATH "${libmem-config_SOURCE_DIR}" "${CMAKE_PREFIX_PATH}")
 set(LIBMEM_DOWNLOAD_VERSION "5.0.4")
+set(LIBMEM_MSVC_CRT "MT")
 
 # Find libmem package
 find_package(libmem CONFIG REQUIRED)
