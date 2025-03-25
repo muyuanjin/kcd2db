@@ -12,7 +12,7 @@
 
 // Database.cpp 优化版本
 Database::Database(SSystemGlobalEnvironment* env) :
-    m_db(std::make_unique<SQLite::Database>("./luadata.db", SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE)),
+    m_db(std::make_unique<SQLite::Database>("./kcd2db.db", SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE)),
     m_lastSaveTime(std::chrono::steady_clock::now())
 {
     CScriptableBase::Init(env->pScriptSystem, env->pSystem);
