@@ -9,9 +9,13 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build" FORCE)
 endif()
 
-
 if(NOT WIN32 OR NOT MSVC)
     message(FATAL_ERROR "This project only supports Windows and MSVC")
+endif()
+
+if (MSVC)
+    # 设置为静态多线程运行时库（Release用MT，Debug用MTd）
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
 set(CMAKE_SYSTEM_NAME Windows)
@@ -50,5 +54,6 @@ add_library(kcd2db SHARED ${KCD2DB_SOURCES})
 target_compile_definitions(kcd2db PRIVATE LM_EXPORT)
 
 target_link_libraries(kcd2db PRIVATE libmem::libmem ntdll SQLiteCpp SQLite::SQLite3)
+
 
 set_target_properties(kcd2db PROPERTIES SUFFIX ".asi" PREFIX "")
