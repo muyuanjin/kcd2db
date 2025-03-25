@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+
+permissions:
+  contents: write
+
+jobs:
+  build-mod:
+    name: Build Mods
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -G "Visual Studio 17 2022" -DSQLITECPP_RUN_CPPLINT=OFF
+
+      - name: Build
+        run: |
+          cmake --build build --config Release
+
+      - name: Get timestamp
+        id: date
+        run: echo "formattedDate=$(Get-Date -Format 'yyyy-MM-dd_HHmm')" >> $env:GITHUB_OUTPUT
+
+      # 动态获取最新的 x64 加载器
+      - name: Get Latest ASI Loader
+        run: |
+          $response = Invoke-RestMethod -Uri "https://api.github.com/repos/ThirteenAG/Ultimate-ASI-Loader/releases/latest"
+          $x64Asset = $response.assets | Where-Object { $_.name -like "*_x64.zip" }
+          Invoke-WebRequest -Uri $x64Asset.browser_download_url -OutFile loader_x64.zip
+          Expand-Archive -Path loader_x64.zip -DestinationPath asi-loader
+
+      # 打包文件
+      - name: Package into ZIP
+        run: |
+          New-Item -ItemType Directory -Path release-package
+          Copy-Item build\Release\*.asi release-package
+          Copy-Item asi-loader\*.dll release-package
+          Compress-Archive -Path release-package\* -DestinationPath kcd2db-${{ steps.date.outputs.formattedDate }}.zip
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: KCD2DB ${{ steps.date.outputs.formattedDate }}
+          tag_name: release-${{ steps.date.outputs.formattedDate }}
+          files: kcd2db-${{ steps.date.outputs.formattedDate }}.zip
+          make_latest: true
+          body: |
+            ## Installation
+
+            Extract **ALL** files from this ZIP to your game directory:
+            `KingdomComeDeliverance2/Bin/Win64MasterMasterSteamPGO/`
+
+            Contains:
+            - Mod ASI file (${{ github.repository }})
+            - Latest Ultimate-ASI-Loader (x64)
+
+            ## Debugging
+            - Launch with `-console` for debug window
