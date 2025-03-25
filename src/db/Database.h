@@ -1,7 +1,4 @@
-//
-// Created by muyuanjin on 2025/3/24.
-//
-
+// Database.h 简化版本
 #pragma once
 #include <functional>
 
@@ -12,54 +9,64 @@
 #include <optional>
 #include <SQLiteCpp/SQLiteCpp.h>
 
-class Database final : public CScriptableBase , public IGameFrameworkListener {
+
+class Database final : public CScriptableBase, public IGameFrameworkListener {
 public:
     explicit Database(SSystemGlobalEnvironment* env);
     ~Database() override;
 
-    // Lua 方法 - 存档关联数据
-    int Set(IFunctionHandler* pH);
-    int Get(IFunctionHandler* pH);
-    int Del(IFunctionHandler* pH);
-    int Exi(IFunctionHandler* pH);
-    
-    // Lua 方法 - 全局数据（跨存档）
-    int SetG(IFunctionHandler* pH);
-    int GetG(IFunctionHandler* pH);
-    int DelG(IFunctionHandler* pH);
-    int ExiG(IFunctionHandler* pH);
-    
-    int Flush(IFunctionHandler* pH);
+    // Lua API
+    int Set(IFunctionHandler* pH)  { return GenericAccess(pH, AccessType::Set); }
+    int Get(IFunctionHandler* pH)  { return GenericAccess(pH, AccessType::Get); }
+    int Del(IFunctionHandler* pH)  { return GenericAccess(pH, AccessType::Del); }
+    int Exi(IFunctionHandler* pH)  { return GenericAccess(pH, AccessType::Exi); }
+    int SetG(IFunctionHandler* pH) { return GenericAccess(pH, AccessType::Set, true); }
+    int GetG(IFunctionHandler* pH) { return GenericAccess(pH, AccessType::Get, true); }
+    int DelG(IFunctionHandler* pH) { return GenericAccess(pH, AccessType::Del, true); }
+    int ExiG(IFunctionHandler* pH) { return GenericAccess(pH, AccessType::Exi, true); }
+
     int Dump(IFunctionHandler* pH);
+
+    const char* getName() const { return m_sGlobalName; }
+
     // IGameFrameworkListener
-    void OnPostUpdate(float fDeltaTime) override {}
     void OnSaveGame(ISaveGame* pSaveGame) override;
     void OnLoadGame(ILoadGame* pLoadGame) override;
+    void OnPostUpdate(float fDeltaTime) override;
+
     void OnLevelEnd(const char* nextLevel)  override {}
     void OnActionEvent(const SActionEvent& event) override {}
     void OnPreRender() override{}
     void OnSavegameFileLoadedInMemory(const char* pLevelName) override{}
     void OnForceLoadingWithFlash()  override                          {}
 
-    // 数据变化检测
-    bool HasDataChanged() const;
-    
 private:
-    void RegisterMethods();
-    void LoadFromDB();
+    enum class AccessType { Set, Get, Del, Exi };
+    typedef std::unordered_map<std::string, ScriptAnyValue> Cache;
+
+    struct CacheData {
+        Cache cache;
+        std::string savefile;
+        bool& changedFlag;
+    };
+
+    static void BatchOperation(SQLite::Database& db, const Cache& cache, const std::string& savefile);
+
+    int GenericAccess(IFunctionHandler* pH, AccessType action, bool isGlobal = false);
+    void SyncCacheWithDatabase();
+
     static std::optional<ScriptAnyValue> ParseAnyValue(int type, const std::string& value);
     static std::optional<std::string> SerializeAnyValue(const ScriptAnyValue& any);
-    void SaveToDB();
     void ExecuteTransaction(const std::function<void(SQLite::Database&)>& task) const;
-    
-    // 数据变更标记
-    void MarkDataChanged();
-    
+
+    std::unique_ptr<SQLite::Database> m_db;
+    std::string m_currentSaveGame;
     mutable std::mutex m_mutex;
-    std::unordered_map<std::string, ScriptAnyValue> m_saveCache; // 存档关联的缓存
-    std::unordered_map<std::string, ScriptAnyValue> m_globalCache; // 全局数据缓存
-    std::unique_ptr<SQLite::Database> m_db;                  // 数据库连接
-    std::string m_dbPath;                                    // 数据库路径
-    std::string m_currentSaveGame;                           // 当前存档文件路径
-    bool m_dataChanged;                                      // 数据是否被修改
+    Cache m_saveCache;
+    Cache m_globalCache;
+
+
+    std::chrono::steady_clock::time_point m_lastSaveTime;
+
+    bool m_globalDirty = false;
 };

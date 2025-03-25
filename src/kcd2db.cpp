@@ -59,16 +59,12 @@ void start()
         auto* env_ptr = reinterpret_cast<SSystemGlobalEnvironment*>(env_addr.value());
         while (env_ptr->pGame == nullptr)
         {
-            LogDebug("Waiting for game to be running...");
             Sleep(1000);
         }
+        LogDebug("Game Started");
         gEnv = *env_ptr;
         const auto db = new Database(env_ptr);
-        LogInfo("Database initialized...%s", db);
-        while (true)
-        {
-            Sleep(10000);
-        }
+        LogInfo("Database initialized...%s", db->getName());
     }
     else
     {

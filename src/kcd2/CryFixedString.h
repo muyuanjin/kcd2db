@@ -576,36 +576,6 @@ inline void CryStackStringT<T, S >::_Initialize()
 	m_nAllocSize = MAX_SIZE - 1; // 0 termination not counted!
 }
 
-//! Always allocate one extra character for '\0' termination.
-//! Assumes (optimistically) that data length will equal allocation length.
-template<class T, size_t S>
-inline void CryStackStringT<T, S >::_AllocData(size_type nLen)
-{
-	assert(nLen >= 0);
-	assert(nLen <= INT_MAX - 1);    // max size (enough room for 1 extra)
-
-	if (nLen == 0)
-		_Initialize();
-	else
-	{
-		size_type allocLen = (nLen + 1) * sizeof(value_type);
-		value_type* pData = m_strBuf;
-		if (allocLen > MAX_SIZE)
-		{
-			pData = (value_type*)CryModuleMalloc(allocLen);
-			_usedMemory(allocLen);   // For statistics.
-			m_nAllocSize = nLen;
-		}
-		else
-		{
-			m_nAllocSize = MAX_SIZE - 1;
-		}
-		m_nLength = nLen;
-		m_str = pData;
-		m_str[nLen] = 0; // null terminated string.
-	}
-}
-
 //////////////////////////////////////////////////////////////////////////
 template<class T, size_t S>
 inline void CryStackStringT<T, S >::_Free()
@@ -614,17 +584,6 @@ inline void CryStackStringT<T, S >::_Free()
 	_Initialize();
 }
 
-//////////////////////////////////////////////////////////////////////////
-template<class T, size_t S>
-inline void CryStackStringT<T, S >::_FreeData(value_type* pData)
-{
-	if (pData != m_strBuf)
-	{
-		size_t allocLen = (m_nAllocSize + 1) * sizeof(value_type);
-		_usedMemory(-check_cast<ptrdiff_t>(allocLen));   // For statistics.
-		CryModuleFree(pData);
-	}
-}
 
 //////////////////////////////////////////////////////////////////////////
 template<class T, size_t S>
@@ -1578,34 +1537,6 @@ inline void CryStackStringT<T, S >::swap(CryStackStringT<T, S>& _Str)
 	_Str.move(temp);
 }
 
-//////////////////////////////////////////////////////////////////////////
-template<class T, size_t S>
-inline CryStackStringT<T, S>& CryStackStringT<T, S >::FormatV(const T* format, va_list args)
-{
-	static_assert(std::is_same<T, char>::value, "This function supports 'char' only");
-	assert(_IsValidString(format));
-
-#if CRY_COMPILER_MSVC && CRY_COMPILER_VERSION <= 1700
-	// Visual Studio 2012 and older don't have va_copy()
-	const int n = CryStringUtils_Internal::compute_length_formatted_va(format, args);
-#else
-	va_list argsCopy;
-	va_copy(argsCopy, args);
-	const int n = CryStringUtils_Internal::compute_length_formatted_va(format, argsCopy);
-	va_end(argsCopy);
-#endif
-
-	if (n < 0)
-	{
-		clear();
-	}
-	else
-	{
-		resize(n);
-		cry_vsprintf(m_str, n + 1, format, args);
-	}
-	return *this;
-}
 
 //////////////////////////////////////////////////////////////////////////
 template<class T, size_t S>
