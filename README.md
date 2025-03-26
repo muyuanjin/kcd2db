@@ -50,6 +50,36 @@ myDB.Set("test", test)
 myDB.SetG("settings", {volume = 0.8, fullscreen = true})
 local settings = myDB.GetG("settings") -- return table {volume = 0.8, fullscreen = true}
 ```
+# DB API Documentation
+
+## Global Methods
+- `DB.Get(key)` - Get local key value
+- `DB.Set(key, value)` - Set local key value
+- `DB.Del(key)` - Delete local key value
+- `DB.Exi(key)` - Check if local key exists
+- `DB.All()` - Get all local key values
+- `DB.GetG(key)` - Get global key value
+- `DB.SetG(key, value)` - Set global key value
+- `DB.DelG(key)` - Delete global key value
+- `DB.ExiG(key)` - Check if global key exists
+- `DB.AllG()` - Get all global key values
+- `DB.Dump()` - Print all data (Note: $1~9 in strings will be treated as color characters)
+- `DB.Create("Your MOD")` - Create a namespace instance
+
+## Quick Access
+- `DB.key` / `DB["key"]` - Access local key value (invalid if the method with the same name exists)
+- `DB.L.key` - Always access local key value
+- `DB.G.key` - Always access global key value
+- `DB.Create("Your MOD").key` - Access namespace local key value
+- `DB.Create("Your MOD").L.key` - Always access namespace local key value
+- `DB.Create("Your MOD").G.key` - Always access namespace global key value
+
+## Notes
+1. When the key name is the same as an existing method, direct access will call the method instead of the key value
+2. When using `Dump()`, $1~9 in strings will be parsed as color codes by the console
+3. All values will be automatically JSON encoded/decoded (if JSON is available)
+4. Namespaces will automatically add a ":" suffix
+
 ### Save-associated APIs
 
 ```lua
@@ -180,7 +210,35 @@ myDB.Set("test", test)
 myDB.SetG("settings", {volume = 0.8, fullscreen = true})
 local settings = myDB.GetG("settings") -- return table {volume = 0.8, fullscreen = true}
 ```
+# DB API 文档
 
+## 全局方法
+- `DB.Get(key)` - 获取本地键值
+- `DB.Set(key, value)` - 设置本地键值
+- `DB.Del(key)` - 删除本地键值
+- `DB.Exi(key)` - 检查本地键是否存在
+- `DB.All()` - 获取所有本地键值
+- `DB.GetG(key)` - 获取全局键值
+- `DB.SetG(key, value)` - 设置全局键值
+- `DB.DelG(key)` - 删除全局键值
+- `DB.ExiG(key)` - 检查全局键是否存在
+- `DB.AllG()` - 获取所有全局键值
+- `DB.Dump()` - 打印所有数据(注意: 字符串中的$1~9会被当作颜色字符)
+- `DB.Create("Your MOD")` - 创建命名空间实例
+
+## 快捷访问
+- `DB.key` / `DB["key"]` - 访问本地键值(与已有方法同名时无效)
+- `DB.L.key` - 总是访问本地键值
+- `DB.G.key` - 总是访问全局键值
+- `DB.Create("Your MOD").key` - 访问命名空间本地键值
+- `DB.Create("Your MOD").L.key` - 总是访问命名空间本地键值
+- `DB.Create("Your MOD").G.key` - 总是访问命名空间全局键值
+
+## 注意事项
+1. 键名与已有方法同名时，直接访问会优先调用方法而非键值
+2. 使用`Dump()`时，字符串中的$1~9会被控制台解析为颜色代码
+3. 所有值会自动进行JSON编码/解码(如果json可用)
+4. 命名空间会自动添加":"后缀
 
 ### 存档关联API
 
