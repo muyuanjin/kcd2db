@@ -1,5 +1,7 @@
 # LuaDB - Kingdom Come Deliverance II Lua Persistence Module
+
 [中文](#简介)
+
 ## Introduction
 
 This module provides **SQLite-based Lua data persistence** for Kingdom Come: Deliverance II mod developers, supporting
@@ -59,11 +61,11 @@ LuaDB.Dump()
 - Key : must be a string
 - Value : can be a boolean, number, or string
 
-| Type    | Storage Format         | Notes                   |
-|---------|------------------------|-------------------------|
-| Boolean | 0/1                    | 0 represents false      |
-| Number  | Single-precision float |                         |
-| String  | Latin1 encoding        | Max 255 bytes currently |
+| Type    | Storage Format         | Notes                                       |
+|---------|------------------------|---------------------------------------------|
+| Boolean | 0/1                    | 0 represents false                          |
+| Number  | Single-precision float |                                             |
+| String  | Latin1 encoding        | After testing, it can save a string of 10MB |
 
 ## Usage Examples
 
@@ -79,11 +81,14 @@ LuaDB.SetG("ending_unlocked", "bad_ending")
 -- View data in console
 LuaDB.Dump()
 ```
+
 ## Build
+
 - `cmake -B build -G "Visual Studio 17 2022" -DSQLITECPP_RUN_CPPLINT=OFF`
 - `cmake --build build --config Release`
 
 ## Debugging
+
 - Uses SQLite3 database named `kcd2db.db` in game root
 - Operation logs stored in `kcd2db.log` in game root
 - If launched with `-console`, debug output will also appear in a separate console window
@@ -94,6 +99,7 @@ This mod heavily utilizes reverse-engineered game internals and may be affected 
 after game updates, try removing the mod file (or rename `.asi` extension to disable).
 
 ---
+
 # LuaDB - 天国拯救2 Lua 数据持久化模块
 
 ## 简介
@@ -154,11 +160,11 @@ LuaDB.Dump()
 - Key : 必须是字符串
 - Value : 可以是布尔值、数字或字符串
 
-| 类型  | 存储格式      | 说明        |
-|-----|-----------|-----------|
-| 布尔值 | 0/1       | 0表示false  |
-| 数字  | 单精度浮点     |           |
-| 字符串 | Latin1 编码 | 目前最长255字节 |
+| 类型  | 存储格式      | 说明                  |
+|-----|-----------|---------------------|
+| 布尔值 | 0/1       | 0表示false            |
+| 数字  | 单精度浮点     |                     |
+| 字符串 | Latin1 编码 | 经过测试，它可以保存一个10MB字符串 |
 
 ## 使用示例
 
@@ -176,10 +182,12 @@ LuaDB.Dump()
 ```
 
 ## 构建
+
 - `cmake -B build -G "Visual Studio 17 2022" -DSQLITECPP_RUN_CPPLINT=OFF`
 - `cmake --build build --config Release`
 
 ## 调试
+
 - 使用位于游戏根目录下名为 `kcd2db.db` 的 SQLite3 数据库
 - 操作日志存储在游戏根目录下的 `kcd2db.log` 文件中
 - 如果使用 `-console` 参数启动，调试输出也会显示在单独的控制台窗口中
