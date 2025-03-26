@@ -22,7 +22,7 @@ std::optional<uintptr_t> find_env_addr()
         return std::nullopt;
     }
 
-    const auto pattern = "48 8B 0D ?? ?? ?? ?? 48 8D 15 ?? ?? ?? ?? 45 33 C9 45 33 C0 4C 8B 11";
+    const auto pattern = "48 8B 0D ?? ?? ?? ?? 48 8D 15 ?? ?? ?? ?? 45 33 C9 45 33 C0 4C 8B 11 41 FF 92 ?? ?? ?? ?? 48 85 FF";
     const auto scan_address = LM_SigScan(pattern, module.base, module.size);
     if (!scan_address)
     {

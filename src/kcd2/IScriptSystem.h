@@ -555,7 +555,7 @@ struct IScriptTable
 		//! Constructor that initialize all data members to initial state.
 		SUserFunctionDesc() : sFunctionName(""), sFunctionParams(""), sGlobalName(""), nParamIdOffset(0), pUserDataFunc(0), pDataBuffer(0), nDataSize(0) {}
 	};
-
+	virtual void Pad0() = 0;
 	// <interfuscator:shuffle>
 	virtual ~IScriptTable(){}
 
@@ -619,8 +619,6 @@ struct IScriptTable
 
 	//! Dumps all table entries to the IScriptTableDumpSink interface.
 	virtual void Dump(IScriptTableDumpSink* p) = 0;
-
-	virtual void Pad0() = 0;
 
 	//! Adds a C++ callback function to the table.
 	//! \note The function is a standard function that returns number of arguments and accept IFunctionHandler as argument.

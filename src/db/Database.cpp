@@ -9,7 +9,6 @@
 #include <sstream>
 #include <unordered_set>
 
-
 // Database.cpp 优化版本
 Database::Database(SSystemGlobalEnvironment* env) :
     m_db(std::make_unique<SQLite::Database>("./kcd2db.db", SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE)),
@@ -44,12 +43,14 @@ Database::Database(SSystemGlobalEnvironment* env) :
     SCRIPT_REG_TEMPLFUNC(Get, "key");
     SCRIPT_REG_TEMPLFUNC(Del, "key");
     SCRIPT_REG_TEMPLFUNC(Exi, "key");
+    SCRIPT_REG_TEMPLFUNC(All, "");
 
     // 全局数据方法（跨存档）
     SCRIPT_REG_TEMPLFUNC(SetG, "key, value");
     SCRIPT_REG_TEMPLFUNC(GetG, "key");
     SCRIPT_REG_TEMPLFUNC(DelG, "key");
     SCRIPT_REG_TEMPLFUNC(ExiG, "key");
+    SCRIPT_REG_TEMPLFUNC(AllG, "");
 
     // 工具方法
     SCRIPT_REG_TEMPLFUNC(Dump, "");
@@ -99,7 +100,8 @@ int Database::GenericAccess(IFunctionHandler* pH, const AccessType action, const
     const char* key = nullptr;
     ScriptAnyValue value;
 
-    if (!pH->GetParam(1, key) || (action == AccessType::Set && !pH->GetParamAny(2, value)))
+    if ((action != AccessType::All && !pH->GetParam(1, key)) || (action == AccessType::Set && !pH->
+        GetParamAny(2, value)))
     {
         LogWarn("Invalid arguments");
         return ArgError(pH);
@@ -139,6 +141,15 @@ int Database::GenericAccess(IFunctionHandler* pH, const AccessType action, const
         }
     case AccessType::Exi:
         return pH->EndFunction(cache.contains(key));
+    case AccessType::All:
+        {
+            const auto table = m_pSS->CreateTable();
+            for (const auto& [k, v] : cache)
+            {
+                table->SetValue(k.c_str(), v);
+            }
+            return pH->EndFunction(table);
+        }
     }
     return ArgError(pH);
 }
@@ -329,7 +340,7 @@ int Database::Dump(IFunctionHandler* pH)
     // Helper function to dump a specific cache
     auto dumpCache = [&](auto& cache, const std::string& cacheType)
     {
-        gEnv->pConsole->PrintLine(("$3--- " + cacheType + " ---").c_str());
+        gEnv->pConsole->PrintLine(("$6--- " + cacheType + " ---").c_str());
         for (const auto& [key, value] : cache)
         {
             switch (value.type)
@@ -337,21 +348,21 @@ int Database::Dump(IFunctionHandler* pH)
             case ANY_TBOOLEAN:
                 {
                     std::ostringstream oss;
-                    oss << "$3" << " Boolean Value [" << key << "] : " << (value.b ? "true" : "false");
+                    oss  << "  $5" << key << "  $8Boolean  $3" << (value.b ? "true" : "false");
                     gEnv->pConsole->PrintLine(oss.str().c_str());
                 }
                 break;
             case ANY_TNUMBER:
                 {
                     std::ostringstream oss;
-                    oss << "$3" << " Number Value [" << key << "] : " << value.number;
+                    oss  << "  $5" << key << "  $8Number  $3" << value.number;
                     gEnv->pConsole->PrintLine(oss.str().c_str());
                 }
                 break;
             case ANY_TSTRING:
                 {
                     std::ostringstream oss;
-                    oss << "$3" << " String Value [" << key << "] : " << (value.str ? value.str : "");
+                    oss << "  $5" << key << "  $8String  $3" << (value.str ? value.str : "");
                     gEnv->pConsole->PrintLine(oss.str().c_str());
                 }
                 break;

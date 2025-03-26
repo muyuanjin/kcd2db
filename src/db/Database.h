@@ -20,10 +20,12 @@ public:
     int Get(IFunctionHandler* pH)  { return GenericAccess(pH, AccessType::Get); }
     int Del(IFunctionHandler* pH)  { return GenericAccess(pH, AccessType::Del); }
     int Exi(IFunctionHandler* pH)  { return GenericAccess(pH, AccessType::Exi); }
+    int All(IFunctionHandler* pH)  { return GenericAccess(pH, AccessType::All); }
     int SetG(IFunctionHandler* pH) { return GenericAccess(pH, AccessType::Set, true); }
     int GetG(IFunctionHandler* pH) { return GenericAccess(pH, AccessType::Get, true); }
     int DelG(IFunctionHandler* pH) { return GenericAccess(pH, AccessType::Del, true); }
     int ExiG(IFunctionHandler* pH) { return GenericAccess(pH, AccessType::Exi, true); }
+    int AllG(IFunctionHandler* pH) { return GenericAccess(pH, AccessType::All, true); }
 
     int Dump(IFunctionHandler* pH);
 
@@ -41,7 +43,7 @@ public:
     void OnForceLoadingWithFlash()  override                          {}
 
 private:
-    enum class AccessType { Set, Get, Del, Exi };
+    enum class AccessType { Set, Get, Del, Exi, All };
     typedef std::unordered_map<std::string, ScriptAnyValue> Cache;
 
     struct CacheData {
