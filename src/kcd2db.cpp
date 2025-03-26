@@ -16,10 +16,11 @@
 std::optional<uintptr_t> find_env_addr()
 {
     lm_module_t module;
-    if (constexpr auto CLIENT_DLL = "WHGame.DLL"; !LM_FindModule(CLIENT_DLL, &module))
+    constexpr auto CLIENT_DLL = "WHGame.DLL";
+    // 持续尝试查找模块
+    while (!LM_FindModule(CLIENT_DLL, &module))
     {
-        LogError("Failed to find module %s\n", CLIENT_DLL);
-        return std::nullopt;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
     const auto pattern = "48 8B 0D ?? ?? ?? ?? 48 8D 15 ?? ?? ?? ?? 45 33 C9 45 33 C0 4C 8B 11 41 FF 92 ?? ?? ?? ?? 48 85 FF";

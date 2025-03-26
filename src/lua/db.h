@@ -135,6 +135,9 @@ _G.DB = _G.DB or (function()
                 else
                     opts.setFunc(key, value)
                 end
+            end,
+            __tostring = function()
+                return opts.toStringFunc()
             end
         }
     end
@@ -148,6 +151,9 @@ _G.DB = _G.DB or (function()
         end,
         delFunc = function(k)
             M.Del(k)
+        end,
+        toStringFunc = function()
+            return tostring(M) .. ":L"
         end
     }))
 
@@ -160,6 +166,9 @@ _G.DB = _G.DB or (function()
         end,
         delFunc = function(k)
             M.DelG(k)
+        end,
+        toStringFunc = function()
+            return tostring(M) .. ":G"
         end
     }))
 
@@ -167,6 +176,10 @@ _G.DB = _G.DB or (function()
     local function Create(namespace)
         assert(type(namespace) == "string" and #namespace > 0,
                 "Namespace must be a non-empty string")
+        -- 如果namespace包含冒号则失败
+        if namespace:find(":") then
+            error("Namespace cannot contain colon")
+        end
 
         -- 确保命名空间以冒号结尾，作为分隔符
         if not namespace:match(":$") then
@@ -259,16 +272,16 @@ _G.DB = _G.DB or (function()
         instance.AllG = wrap(_allGImpl, 0, instance)
 
         local function _dumpImpl()
-            System.LogAlways("$6--- [Global Data For: " .. namespace .. "] ---\n")
+            System.LogAlways("$6--- [Global Data For: " .. namespace:sub(1, -2) .. "] ---\n")
             local globalResult = instance.AllG()
             for k, v in pairs(globalResult) do
-                System.LogAlways("  $5" .. k .. "  $8" .. type(v) .. "  $3" .. encode_value(v) .. "\n")
+                System.LogAlways("  $5" .. k .. "  $8" .. type(v) .. "  $3" .. tostring(encode_value(v)) .. "\n")
             end
             -- 修复此处：从插入表格改为插入字符串
-            System.LogAlways("$6--- [Saved Data For: " .. namespace .. "] ---\n")
+            System.LogAlways("$6--- [Saved Data For: " .. namespace:sub(1, -2) .. "] ---\n")
             local localResult = instance.All()
             for k, v in pairs(localResult) do
-                System.LogAlways("  $5" .. k .. "  $8" .. type(v) .. "  $3" .. encode_value(v) .. "\n")
+                System.LogAlways("  $5" .. k .. "  $8" .. type(v) .. "  $3" .. tostring(encode_value(v)) .. "\n")
             end
         end
         instance.Dump = wrap(_dumpImpl, 0, instance)
@@ -284,6 +297,9 @@ _G.DB = _G.DB or (function()
             end,
             delFunc = function(k)
                 instance.Del(k)
+            end,
+            toStringFunc = function()
+                return tostring(instance) .. ":L"
             end
         }))
         -- 全局操作（G 子表）
@@ -296,6 +312,9 @@ _G.DB = _G.DB or (function()
             end,
             delFunc = function(k)
                 instance.DelG(k)
+            end,
+            toStringFunc = function()
+                return tostring(instance) .. ":G"
             end
         }))
         -- 主表的元表（额外需要处理方法覆盖保护）
@@ -315,6 +334,9 @@ _G.DB = _G.DB or (function()
                 else
                     instance.Set(key, value)
                 end
+            end,
+            __tostring = function()
+                return "DB Instance: " .. namespace:sub(1, -2)
             end
         })
 
@@ -336,6 +358,12 @@ _G.DB = _G.DB or (function()
             else
                 M.Set(key, value)
             end
+        end,
+        __call = function(_, namespace)
+            return M.Create(namespace)
+        end,
+        __tostring = function()
+            return "DB"
         end
     })
 
