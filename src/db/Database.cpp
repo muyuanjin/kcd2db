@@ -162,8 +162,15 @@ void Database::OnSaveGame(ISaveGame* pSaveGame)
         std::lock_guard lock(m_mutex);
         if (!m_saveCache.empty())
         {
-            BatchOperation(*m_db, m_saveCache, newSave);
-            LogInfo("Data saved: %d entries", m_saveCache.size());
+            if (const int successCount = BatchOperation(*m_db, m_saveCache, newSave);
+                successCount == m_saveCache.size())
+            {
+                LogInfo("Data saved: %d entries", m_saveCache.size());
+            }
+            else
+            {
+                LogError("Save data error: %d/%d entries saved", successCount, m_saveCache.size());
+            }
         }
     }
     catch (const std::exception& e)
@@ -181,9 +188,12 @@ void Database::OnPostUpdate(float /*fDeltaTime*/)
     std::lock_guard lock(m_mutex);
     if (!m_globalDirty) return;
     if (const auto now = steady_clock::now(); now - m_lastSaveTime < SAVE_INTERVAL) return;
+
+    int successCount = 0;
+
     try
     {
-        ExecuteTransaction([this](SQLite::Database& db)
+        ExecuteTransaction([this, &successCount](const SQLite::Database& db)
         {
             SQLite::Statement clearStmt(db, "DELETE FROM Store WHERE savefile = ''");
             clearStmt.exec();
@@ -201,12 +211,20 @@ void Database::OnPostUpdate(float /*fDeltaTime*/)
                     stmt.bind(3, *val);
                     stmt.exec();
                     stmt.reset();
+                    successCount++;
                 }
             }
         });
         m_globalDirty = false;
         m_lastSaveTime = steady_clock::now();
-        LogInfo("Global data saved: %d entries", m_globalCache.size());
+        if (successCount == m_globalCache.size())
+        {
+            LogInfo("Global data saved: %d entries", m_globalCache.size());
+        }
+        else
+        {
+            LogError("Global save failed: %d/%d entries saved", successCount, m_globalCache.size());
+        }
     }
     catch (const std::exception& e)
     {
@@ -221,7 +239,7 @@ void Database::ExecuteTransaction(const std::function<void(SQLite::Database&)>& 
     transaction.commit();
 }
 
-void Database::BatchOperation(SQLite::Database& db, const Cache& cache, const std::string& savefile)
+int Database::BatchOperation(SQLite::Database& db, const Cache& cache, const std::string& savefile)
 {
     static constexpr auto UPSERT_SQL = R"sql(
         INSERT INTO Store (key, savefile, type, value, updated_at)
@@ -235,6 +253,8 @@ void Database::BatchOperation(SQLite::Database& db, const Cache& cache, const st
     SQLite::Statement stmt(db, UPSERT_SQL);
     SQLite::Transaction transaction(db);
 
+    int count = 0;
+
     for (const auto& [k, v] : cache)
     {
         if (auto val = SerializeAnyValue(v))
@@ -246,8 +266,10 @@ void Database::BatchOperation(SQLite::Database& db, const Cache& cache, const st
             stmt.exec();
             stmt.reset();
         }
+        count++;
     }
     transaction.commit();
+    return count;
 }
 
 std::optional<ScriptAnyValue> Database::ParseAnyValue(const int type, const std::string& value)
@@ -341,7 +363,7 @@ int Database::Dump(IFunctionHandler* pH)
 
     dumpCache(m_globalCache, "[Global Data]");
     std::ostringstream oss;
-    oss << "[Save Data For : " << (m_currentSaveGame.empty() ? "No active save file" : m_currentSaveGame) <<"]";
+    oss << "[Save Data For : " << (m_currentSaveGame.empty() ? "No active save file" : m_currentSaveGame) << "]";
     dumpCache(m_saveCache, oss.str());
     return pH->EndFunction();
 }

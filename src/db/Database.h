@@ -50,7 +50,7 @@ private:
         bool& changedFlag;
     };
 
-    static void BatchOperation(SQLite::Database& db, const Cache& cache, const std::string& savefile);
+    static int BatchOperation(SQLite::Database& db, const Cache& cache, const std::string& savefile);
 
     int GenericAccess(IFunctionHandler* pH, AccessType action, bool isGlobal = false);
     void SyncCacheWithDatabase();
