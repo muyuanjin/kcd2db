@@ -57,47 +57,72 @@ _G.DB = _G.DB or (function()
             return namespace .. key
         end
 
+        -- 通用包装函数，处理点调用和冒号调用
+        local function wrap(func, param_count)
+            return function(...)
+                local args = {...}
+                local is_method_call = #args >= 1 and args[1] == instance
+                local call_args = {}
 
-        -- 存档关联API
+                if is_method_call then
+                    for i = 1, param_count do
+                        call_args[i] = args[i + 1]
+                    end
+                else
+                    for i = 1, param_count do
+                        call_args[i] = args[i]
+                    end
+                end
 
-        function instance.Set(key, value)
+                return func(unpack(call_args, 1, param_count))
+            end
+        end
+
+        -- Define methods with parameter counts
+        local function setImpl(key, value)
             return LuaDB.Set(prefix_key(key), encode_value(value))
         end
+        instance.Set = wrap(setImpl, 2)
 
-        function instance.Get(key)
+        local function getImpl(key)
             return decode_value(LuaDB.Get(prefix_key(key)))
         end
+        instance.Get = wrap(getImpl, 1)
 
-        function instance.Del(key)
+        local function delImpl(key)
             return LuaDB.Del(prefix_key(key))
         end
+        instance.Del = wrap(delImpl, 1)
 
-        function instance.Exi(key)
+        local function exiImpl(key)
             return LuaDB.Exi(prefix_key(key))
         end
+        instance.Exi = wrap(exiImpl, 1)
 
-        -- 全局API（跨存档）
-
-        function instance.SetG(key, value)
+        local function setGImpl(key, value)
             return LuaDB.SetG(prefix_key(key), encode_value(value))
         end
+        instance.SetG = wrap(setGImpl, 2)
 
-        function instance.GetG(key)
+        local function getGImpl(key)
             return decode_value(LuaDB.GetG(prefix_key(key)))
         end
+        instance.GetG = wrap(getGImpl, 1)
 
-        function instance.DelG(key)
+        local function delGImpl(key)
             return LuaDB.DelG(prefix_key(key))
         end
+        instance.DelG = wrap(delGImpl, 1)
 
-        function instance.ExiG(key)
+        local function exiGImpl(key)
             return LuaDB.ExiG(prefix_key(key))
         end
+        instance.ExiG = wrap(exiGImpl, 1)
 
-        -- 调试命令，在实现特定前缀查询前原样转发
-        function instance.Dump()
+        local function dumpImpl()
             return LuaDB.Dump()
         end
+        instance.Dump = wrap(dumpImpl, 0)
 
         return instance
     end
