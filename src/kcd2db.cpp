@@ -10,6 +10,8 @@
 #include "kcd2/env.h"
 #include "kcd2/IConsole.h"
 #include "log/log.h"
+#include "lua/db.h"
+
 
 std::optional<uintptr_t> find_env_addr()
 {
@@ -56,14 +58,19 @@ void start()
             return;
         }
         LogDebug("Found environment address: 0x%llX", *env_addr);
+
         auto* env_ptr = reinterpret_cast<SSystemGlobalEnvironment*>(env_addr.value());
         while (env_ptr->pGame == nullptr)
         {
             Sleep(1000);
         }
         LogDebug("Game Started");
+
         gEnv = *env_ptr;
         const auto db = new Database(env_ptr);
+
+        env_ptr->pScriptSystem->ExecuteBuffer(db_lua, strlen(db_lua), "db.lua");
+
         LogInfo("Database initialized...%s", db->getName());
     }
     else

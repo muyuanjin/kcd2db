@@ -62,6 +62,7 @@ jobs:
           tag_name: release-${{ steps.date.outputs.formattedDate }}
           files: kcd2db-${{ steps.date.outputs.formattedDate }}.zip
           make_latest: true
+          generate_release_notes: true
           body: |
             ## Installation
 
