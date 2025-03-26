@@ -64,7 +64,9 @@ local settings = myDB.GetG("settings") -- return table {volume = 0.8, fullscreen
 - `DB.ExiG(key)` - Check if global key exists
 - `DB.AllG()` - Get all global key values
 - `DB.Dump()` - Print all data (Note: $1~9 in strings will be treated as color characters)
-- `DB.Create("Your MOD")` - Create a namespace instance
+- `DB.Create("Your MOD")` - Create a namespace instance  
+
+All methods support both . Call and : Call syntax, which can be selected according to personal preferences.
 
 ## Quick Access
 - `DB.key` / `DB["key"]` - Access local key value (invalid if the method with the same name exists)
@@ -224,7 +226,9 @@ local settings = myDB.GetG("settings") -- return table {volume = 0.8, fullscreen
 - `DB.ExiG(key)` - 检查全局键是否存在
 - `DB.AllG()` - 获取所有全局键值
 - `DB.Dump()` - 打印所有数据(注意: 字符串中的$1~9会被当作颜色字符)
-- `DB.Create("Your MOD")` - 创建命名空间实例
+- `DB.Create("Your MOD")` - 创建命名空间实例  
+
+所有的方法都同时支持 . 调用和 : 调用语法，可以根据个人喜好选择使用
 
 ## 快捷访问
 - `DB.key` / `DB["key"]` - 访问本地键值(与已有方法同名时无效)
