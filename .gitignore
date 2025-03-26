@@ -1,4 +1,5 @@
 /.idea/
+/.run/
 /.vscode/
 /cmake-build*/
 build
