@@ -17,6 +17,35 @@ two storage modes:
 
 ## API Documentation
 
+### The new version updates the ease-of-use API wrapper for lua
+Use `DB.Create` to create a database object, then use the methods of that object to store and retrieve data.  
+
+`DB` will automatically convert key, value into JSON strings for storage, and automatically parse JSON strings back into lua objects when reading.  
+
+You can now store any lua object! Including tables, strings, numbers, booleans, etc.  
+
+Strings in objects are no longer limited by character sets.
+
+```lua
+local myDB = DB.Create("MyAwesomeMod")  -- Use your Mod name or a unique enough string that won't conflict as the namespace
+myDB:Set("player_health", 85.6)
+myDB:Set("has_dragon_sword", true)
+-- Test storage/retrieval of complex large objects
+local test = {
+    a = 1,
+    b = "nihao",
+    c = {
+        d = 2,
+        e = "shijie",
+        f = {
+            g = 3,
+            h = "非ASCII字符"
+        }
+    },
+    d = string.rep("a", 1000)
+}
+myDB.Set("test", test)
+```
 ### Save-associated APIs
 
 ```lua
@@ -115,6 +144,35 @@ after game updates, try removing the mod file (or rename `.asi` extension to dis
 2. 将本Mod的`.asi`文件与ASI加载器共同放置于游戏根目录（`KingdomCome.exe`所在目录）
 
 ## API文档
+
+### 新版本更新了 lua 的易用性API包装
+使用 `DB.Create` 创建一个数据库对象，然后使用该对象的方法进行数据存储和读取。  
+
+`DB`将自动把key,value转换为json字符串进行存储，读取时自动解析json字符串还原为lua对象。  
+
+你现在可以存储任何lua对象！，包括table，string，number，boolean等等，对象中的字符串也不再有字符集限制  
+
+```lua
+local myDB = DB.Create("MyAwesomeMod")  -- 使用你的 Mod 名或者一个足够独特不会冲突的字符串作为命名空间
+myDB:Set("player_health", 85.6)
+myDB:Set("has_dragon_sword", true)
+-- 测试复杂大对象的存储/读取
+local test = {
+    a = 1,
+    b = "nihao",
+    c = {
+        d = 2,
+        e = "shijie",
+        f = {
+            g = 3,
+            h = "测试字符"
+        }
+    },
+    d = string.rep("a", 1000)
+}
+myDB.Set("test", test)
+```
+
 
 ### 存档关联API
 
