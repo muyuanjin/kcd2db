@@ -110,12 +110,6 @@ int Database::GenericAccess(IFunctionHandler* pH, const AccessType action, const
     std::lock_guard lock(m_mutex);
     auto& cache = isGlobal ? m_globalCache : m_saveCache;
 
-    if (!isGlobal && m_currentSaveGame.empty())
-    {
-        LogWarn("Using save-specific API without active save, use global API instead");
-        return ArgError(pH);
-    }
-
     switch (action)
     {
     case AccessType::Set:
@@ -348,14 +342,14 @@ int Database::Dump(IFunctionHandler* pH)
             case ANY_TBOOLEAN:
                 {
                     std::ostringstream oss;
-                    oss  << "  $5" << key << "  $8Boolean  $3" << (value.b ? "true" : "false");
+                    oss << "  $5" << key << "  $8Boolean  $3" << (value.b ? "true" : "false");
                     gEnv->pConsole->PrintLine(oss.str().c_str());
                 }
                 break;
             case ANY_TNUMBER:
                 {
                     std::ostringstream oss;
-                    oss  << "  $5" << key << "  $8Number  $3" << value.number;
+                    oss << "  $5" << key << "  $8Number  $3" << value.number;
                     gEnv->pConsole->PrintLine(oss.str().c_str());
                 }
                 break;
