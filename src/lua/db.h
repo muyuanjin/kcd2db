@@ -164,7 +164,7 @@ _G.DB = _G.DB or (function()
     }))
 
     -- 创建带命名空间的 DB 实例
-    function M.Create(namespace)
+    local function Create(namespace)
         assert(type(namespace) == "string" and #namespace > 0,
                 "Namespace must be a non-empty string")
 
@@ -320,6 +320,7 @@ _G.DB = _G.DB or (function()
 
         return instance
     end
+    M.Create = wrap(Create, 1, M)
 
     setmetatable(M, {
         __index = function(t, key)
