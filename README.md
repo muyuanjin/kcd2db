@@ -22,14 +22,14 @@ Use `DB.Create` to create a database object, then use the methods of that object
 
 `DB` will automatically convert key, value into JSON strings for storage, and automatically parse JSON strings back into lua objects when reading.  
 
-You can now store any lua object! Including tables, strings, numbers, booleans, etc.  
+You can now store any Lua object encodable by [json.lua](https://github.com/rxi/json.lua)! Including tables, strings, numbers, booleans, etc.  
 
 Strings in objects are no longer limited by character sets.
 
 ```lua
 local myDB = DB.Create("MyAwesomeMod")  -- Use your Mod name or a unique enough string that won't conflict as the namespace
-myDB:Set("player_health", 85.6)
-myDB:Set("has_dragon_sword", true)
+myDB.Set("player_health", 85.6)
+myDB:Set("has_dragon_sword", true) -- myDB allows both .call and :call syntax
 -- Test storage/retrieval of complex large objects
 local test = {
     a = 1,
@@ -45,6 +45,10 @@ local test = {
     d = string.rep("a", 1000)
 }
 myDB.Set("test", test)
+
+-- Global APIs (Cross-save)
+myDB.SetG("settings", {volume = 0.8, fullscreen = true})
+local settings = myDB.GetG("settings") -- return table {volume = 0.8, fullscreen = true}
 ```
 ### Save-associated APIs
 
@@ -150,12 +154,12 @@ after game updates, try removing the mod file (or rename `.asi` extension to dis
 
 `DB`将自动把key,value转换为json字符串进行存储，读取时自动解析json字符串还原为lua对象。  
 
-你现在可以存储任何lua对象！，包括table，string，number，boolean等等，对象中的字符串也不再有字符集限制  
+你现在可以存储任何可以通过[json.lua](https://github.com/rxi/json.lua)编码的Lua对象了！，包括table，string，number，boolean等等，对象中的字符串也不再有字符集限制  
 
 ```lua
 local myDB = DB.Create("MyAwesomeMod")  -- 使用你的 Mod 名或者一个足够独特不会冲突的字符串作为命名空间
-myDB:Set("player_health", 85.6)
-myDB:Set("has_dragon_sword", true)
+myDB.Set("player_health", 85.6)
+myDB:Set("has_dragon_sword", true)  -- myDB 允许.调用 和 :调用 语法
 -- 测试复杂大对象的存储/读取
 local test = {
     a = 1,
@@ -171,6 +175,10 @@ local test = {
     d = string.rep("a", 1000)
 }
 myDB.Set("test", test)
+
+-- 全局API（跨存档）
+myDB.SetG("settings", {volume = 0.8, fullscreen = true})
+local settings = myDB.GetG("settings") -- return table {volume = 0.8, fullscreen = true}
 ```
 
 
