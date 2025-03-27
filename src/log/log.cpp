@@ -133,24 +133,29 @@ void InitConsole()
 void Log_init()
 {
     InitConsole();
-    // 打开日志文件以追加模式
-    if (std::ofstream logFile(Filename, std::ios_base::app); logFile.is_open())
+    constexpr size_t max_size = 10 * 1024 * 1024;
+    // 检查并清空过大的日志文件
+    if (std::ifstream in(Filename, std::ios::ate | std::ios::binary);
+        in.is_open() && in.tellg() > max_size)
+    {
+        in.close();
+        std::ofstream(Filename, std::ios::trunc).close();
+    }
+    // 追加启动日志
+    if (std::ofstream out(Filename, std::ios::app); out.is_open())
     {
         const auto now = std::chrono::system_clock::now();
-        const std::time_t now_time = std::chrono::system_clock::to_time_t(now);
-
-        std::tm tm_struct{};
-        localtime_s(&tm_struct, &now_time);
-
-        logFile << "\nLog file initialized at "
-            << std::put_time(&tm_struct, "%Y-%m-%d %H:%M:%S")
-            << std::endl;
+        const std::time_t t = std::chrono::system_clock::to_time_t(now);
+        std::tm tm;
+        localtime_s(&tm, &t);
+        out << "\nLog initialized at " << std::put_time(&tm, "%F %T") << '\n';
     }
     else
     {
-        std::cerr << "Error: Unable to open log file: " << Filename << std::endl;
+        std::cerr << "Error opening log file: " << Filename << '\n';
     }
 }
+
 
 // 各级别日志函数
 void LogDebug(const char* format, ...)
