@@ -112,6 +112,49 @@ int BatchOperation(SQLite::Database& db, const std::unordered_map<std::string, S
     return count;
 }
 
+void CheckAndVacuum(SQLite::Database& db)
+{
+    bool shouldVacuum = false;
+    // 查询最后执行时间
+    {
+        if (SQLite::Statement query(db, "SELECT value FROM Meta WHERE key = 'last_vacuum_time'"); query.executeStep())
+        {
+            time_t lastVacuumTime = 0;
+            const std::string valueStr = query.getColumn(0).getString();
+            lastVacuumTime = std::stol(valueStr);
+            if (const time_t now_t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+                now_t - lastVacuumTime > 7 * 24 * 3600)
+            {
+                shouldVacuum = true;
+            }
+        }
+        else
+        {
+            shouldVacuum = true; // 无记录时触发第一次VACUUM
+        }
+    }
+
+    // 执行优化逻辑
+    if (shouldVacuum)
+    {
+        try
+        {
+            // VACUUM命令不能在事务中执行
+            db.exec("VACUUM");
+            // 更新执行时间戳
+            const time_t now_t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+            SQLite::Statement update(db,
+                                     "INSERT OR REPLACE INTO Meta (key, value) VALUES ('last_vacuum_time', ?)");
+            update.bind(1, std::to_string(now_t));
+            update.exec();
+        }
+        catch (const std::exception& e)
+        {
+            LogError("VACUUM failed: %s", e.what());
+        }
+    }
+}
+
 // Database.cpp 优化版本
 LuaDB::LuaDB(SSystemGlobalEnvironment* env) :
     m_db(std::make_unique<SQLite::Database>("./kcd2db.db", SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE)),
@@ -134,8 +177,13 @@ LuaDB::LuaDB(SSystemGlobalEnvironment* env) :
             )
         )");
         db.exec("CREATE INDEX IF NOT EXISTS idx_store_savefile ON Store(savefile)");
+        db.exec(R"(
+            CREATE TABLE IF NOT EXISTS Meta (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        )");
     });
-    m_db->exec("VACUUM");
     env->pGame->GetIGameFramework()->RegisterListener(this, "LuaDB", FRAMEWORKLISTENERPRIORITY_DEFAULT);
     SyncCacheWithDatabase();
 #undef SCRIPT_REG_CLASSNAME
@@ -157,6 +205,8 @@ LuaDB::LuaDB(SSystemGlobalEnvironment* env) :
 
     // 工具方法
     SCRIPT_REG_TEMPLFUNC(Dump, "");
+
+    CheckAndVacuum(*m_db);
 }
 
 void LuaDB::SyncCacheWithDatabase()
