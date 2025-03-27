@@ -135,7 +135,7 @@ LuaDB::LuaDB(SSystemGlobalEnvironment* env) :
         )");
         db.exec("CREATE INDEX IF NOT EXISTS idx_store_savefile ON Store(savefile)");
     });
-
+    m_db->exec("VACUUM");
     env->pGame->GetIGameFramework()->RegisterListener(this, "LuaDB", FRAMEWORKLISTENERPRIORITY_DEFAULT);
     SyncCacheWithDatabase();
 #undef SCRIPT_REG_CLASSNAME
