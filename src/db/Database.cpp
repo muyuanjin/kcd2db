@@ -114,6 +114,7 @@ int Database::GenericAccess(IFunctionHandler* pH, const AccessType action, const
     {
     case AccessType::Set:
         cache[key] = value;
+        LogDebug(isGlobal ? "Set Global %s = %s" : "Set %s = %s", key, FormatAnyValue(value));
         if (isGlobal)
         {
             m_globalDirty = true;
@@ -127,6 +128,7 @@ int Database::GenericAccess(IFunctionHandler* pH, const AccessType action, const
     case AccessType::Del:
         {
             const bool erased = cache.erase(key) > 0;
+            LogDebug(isGlobal ? "Delete Global %s: %s" : "Delete %s: %s", key, erased ? "OK" : "Not found");
             if (isGlobal && erased)
             {
                 m_globalDirty = true;
@@ -194,10 +196,9 @@ void Database::OnPostUpdate(float /*fDeltaTime*/)
     if (!m_globalDirty) return;
     if (const auto now = steady_clock::now(); now - m_lastSaveTime < SAVE_INTERVAL) return;
 
-    int successCount = 0;
-
     try
     {
+        int successCount = 0;
         ExecuteTransaction([this, &successCount](const SQLite::Database& db)
         {
             SQLite::Statement clearStmt(db, "DELETE FROM Store WHERE savefile = ''");
@@ -279,32 +280,17 @@ int Database::BatchOperation(SQLite::Database& db, const Cache& cache, const std
 
 std::optional<ScriptAnyValue> Database::ParseAnyValue(const int type, const std::string& value)
 {
-    ScriptAnyValue any;
     switch (type)
     {
     case ANY_TBOOLEAN:
-        {
-            any.type = ANY_TBOOLEAN;
-            any.b = std::stoi(value) != 0;
-        }
-        break;
+        return ScriptAnyValue(std::stoi(value) != 0);
     case ANY_TNUMBER:
-        {
-            any.type = ANY_TNUMBER;
-            any.number = std::stod(value);
-        }
-        break;
+        return ScriptAnyValue(std::stof(value));
     case ANY_TSTRING:
-        {
-            any.type = ANY_TSTRING;
-            // Fix for string encoding issues - ensure we properly handle UTF-8 strings
-            any.str = _strdup(value.c_str());
-        }
-        break;
+        return ScriptAnyValue(_strdup(value.c_str()));
     default:
         return std::nullopt;
     }
-    return any;
 }
 
 std::optional<std::string> Database::SerializeAnyValue(const ScriptAnyValue& any)
@@ -318,12 +304,29 @@ std::optional<std::string> Database::SerializeAnyValue(const ScriptAnyValue& any
     case ANY_TSTRING:
         {
             if (!any.str) return "";
-
-            // Return the string directly - SQLite handles UTF-8 text natively
             return std::string(any.str);
         }
     default:
         return std::nullopt;
+    }
+}
+
+const char* Database::FormatAnyValue(const ScriptAnyValue& value)
+{
+    switch (value.type)
+    {
+    case ANY_TNUMBER: return std::to_string(value.number).c_str();
+    case ANY_TSTRING: return value.str;
+    case ANY_TBOOLEAN: return value.b ? "true" : "false";
+    case ANY_TTABLE: return "[Table]";
+    case ANY_TNIL: return "[Nil]";
+    case ANY_TFUNCTION: return "[Function]";
+    case ANY_TUSERDATA: return "[UserData]";
+    case ANY_TVECTOR: return "[Vector]";
+    case ANY_COUNT: return "[Count]";
+    case ANY_THANDLE: return "[Handle]";
+    case ANY_ANY: return "[Any]";
+    default: return "[Unknown]";
     }
 }
 

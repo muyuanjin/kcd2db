@@ -59,6 +59,7 @@ private:
 
     static std::optional<ScriptAnyValue> ParseAnyValue(int type, const std::string& value);
     static std::optional<std::string> SerializeAnyValue(const ScriptAnyValue& any);
+    static const char* FormatAnyValue(const ScriptAnyValue& value);
     void ExecuteTransaction(const std::function<void(SQLite::Database&)>& task) const;
 
     std::unique_ptr<SQLite::Database> m_db;
