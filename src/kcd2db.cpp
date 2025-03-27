@@ -6,7 +6,7 @@
 #include <libmem/libmem.h>
 
 #define KCD2_ENV_IMPORT
-#include "db/Database.h"
+#include "db/LuaDB.h"
 #include "kcd2/env.h"
 #include "kcd2/IGame.h"
 #include "log/log.h"
@@ -19,7 +19,7 @@ std::optional<uintptr_t> find_env_addr()
     // 持续尝试查找模块
     while (!LM_FindModule(CLIENT_DLL, &module))
     {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
     // 通常会找到两个地址，不过两个地址其实通过RIP之后的偏移是一样的，都是指向 gEnv->pConsole 的 qword_1848A7C68
     const auto pattern = "48 8B 0D ?? ?? ?? ?? 48 8D 15 ?? ?? ?? ?? 45 33 C9 45 33 C0 4C 8B 11";
@@ -65,13 +65,13 @@ void start()
             || env_ptr->pScriptSystem == nullptr
             || env_ptr->pConsole == nullptr)
         {
-            Sleep(1000);
+            Sleep(500);
         }
         LogDebug("Game Started");
 
         gEnv = *env_ptr;
 
-        const auto db = new Database(env_ptr);
+        const auto db = new LuaDB(env_ptr);
         LogInfo("Database initialized...%s", db->getName());
 
         env_ptr->pScriptSystem->ExecuteBuffer(db_lua, strlen(db_lua), "db.lua");

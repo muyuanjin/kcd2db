@@ -142,7 +142,7 @@ void Log_init()
         std::tm tm_struct{};
         localtime_s(&tm_struct, &now_time);
 
-        logFile << "Log file initialized at "
+        logFile << "\nLog file initialized at "
             << std::put_time(&tm_struct, "%Y-%m-%d %H:%M:%S")
             << std::endl;
     }
