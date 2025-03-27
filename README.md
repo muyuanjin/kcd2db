@@ -114,7 +114,7 @@ All methods support both . Call and : Call syntax, which can be selected accordi
 ## Notes
 1. When the key name is the same as an existing method, direct access will call the method instead of the key value
 2. When using `Dump()`, $1~9 in strings will be parsed as color codes by the console
-3. All values will be automatically JSON encoded/decoded (if JSON is available)
+3. All values will be automatically JSON encoded/decoded (the game has built-in json.lua V0.1.1).
 4. Namespaces will automatically add a ":" suffix
 
 ### Save-associated APIs
@@ -315,7 +315,7 @@ YourMod:Init()
 ## 注意事项
 1. 键名与已有方法同名时，直接访问会优先调用方法而非键值
 2. 使用`Dump()`时，字符串中的$1~9会被控制台解析为颜色代码
-3. 所有值会自动进行JSON编码/解码(如果json可用)
+3. 所有值会自动进行JSON编码/解码(游戏内置了 json.lua v0.1.1)
 4. 命名空间会自动添加":"后缀
 
 ### 存档关联API

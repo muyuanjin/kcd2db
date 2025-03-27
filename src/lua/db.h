@@ -8,11 +8,14 @@
 inline auto db_lua = R"lua(
 _G.DB = _G.DB or (function()
     -- 检查 json 是否可用
-    local _json_available = false
-
-    local json_available = function()
-        if _json_available == false then
+    local _json_available
+    local function json_available()
+        if _json_available == nil then
             _json_available = type(json) == "table" and type(json.encode) == "function" and type(json.decode) == "function"
+            if not _json_available then
+                Script.LoadScript("Scripts/Utils/JSON/json.lua")
+                _json_available = type(json) == "table" and type(json.encode) == "function" and type(json.decode) == "function"
+            end
         end
         return _json_available
     end
