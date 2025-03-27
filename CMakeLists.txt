@@ -4,11 +4,6 @@ project(kcd2db LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Set default build type to Release
-if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build" FORCE)
-endif()
-
 if(NOT WIN32 OR NOT MSVC)
     message(FATAL_ERROR "This project only supports Windows and MSVC")
 endif()
@@ -26,7 +21,12 @@ FetchContent_Declare(libmem-config URL "https://raw.githubusercontent.com/rdbo/l
 FetchContent_MakeAvailable(libmem-config)
 set(CMAKE_PREFIX_PATH "${libmem-config_SOURCE_DIR}" "${CMAKE_PREFIX_PATH}")
 set(LIBMEM_DOWNLOAD_VERSION "5.0.4")
-set(LIBMEM_MSVC_CRT "MT")
+# 设置libmem的运行时，如果是Release则使用MT，如果是Debug则使用MTd
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(LIBMEM_MSVC_CRT "MTd")
+else()
+    set(LIBMEM_MSVC_CRT "MT")
+endif()
 
 # Find libmem package
 find_package(libmem CONFIG REQUIRED)
