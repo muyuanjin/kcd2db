@@ -50,6 +50,43 @@ myDB.Set("test", test)
 myDB.SetG("settings", {volume = 0.8, fullscreen = true})
 local settings = myDB.GetG("settings") -- return table {volume = 0.8, fullscreen = true}
 ```
+## Sample
+```lua
+YourMod = YourMod or (function()
+-- Make LuaDB an enhancement for mods, allowing users to opt for LuaDB to achieve persistence.
+local db = LuaDB and DB and select(2, pcall(DB.Create,"YourMod"))
+return {
+version = "__VERSION__",
+localData = db and db.L or {},
+globalData = db and db.G or {}
+}
+end)()
+
+function YourMod:Init()
+local settingA = YourMod.localData.settingA
+local settingB = YourMod.globalData.settingB
+-- do something with settings
+end
+
+function YourMod:Save()
+YourMod.localData.settingA = "valueA"
+YourMod.globalData.settingB = { a = 1, b = 2 }
+-- save settings
+end
+
+function YourMod:DoSomething()
+local settingA = YourMod.localData.settingA
+local settingB = YourMod.globalData.settingB
+-- do something with settings
+
+-- update settings if something changed
+YourMod.localData.settingA = settingA
+YourMod.globalData.settingB = settingB
+end
+
+YourMod:Init()
+```
+
 # DB API Documentation
 
 ## Global Methods
@@ -69,12 +106,10 @@ local settings = myDB.GetG("settings") -- return table {volume = 0.8, fullscreen
 All methods support both . Call and : Call syntax, which can be selected according to personal preferences.
 
 ## Quick Access
+- `DB("Your MOD")` - Equivalent to `DB.Create("Your MOD")`
 - `DB.key` / `DB["key"]` - Access local key value (invalid if the method with the same name exists)
-- `DB.L.key` - Always access local key value
-- `DB.G.key` - Always access global key value
-- `DB.Create("Your MOD").key` - Access namespace local key value
-- `DB.Create("Your MOD").L.key` - Always access namespace local key value
-- `DB.Create("Your MOD").G.key` - Always access namespace global key value
+- `DB.L.key` /  `DB.L["key"]`  - Always access local key value, If you are not sure whether your key conflicts with an existing method name
+- `DB.G.key` / `DB.G["key"]` - Always access global key value, If you are not sure whether your key conflicts with an existing method name
 
 ## Notes
 1. When the key name is the same as an existing method, direct access will call the method instead of the key value
@@ -163,6 +198,8 @@ LuaDB.Dump()
 This mod heavily utilizes reverse-engineered game internals and may be affected by game updates. If experiencing crashes
 after game updates, try removing the mod file (or rename `.asi` extension to disable).
 
+## Want to know how I found the offset? Check out this [How to find the address of gEnv](https://github.com/muyuanjin/kcd2-mod-docs/blob/main/DISASSEMBLY.md)
+
 ---
 
 # LuaDB - 天国拯救2 Lua 数据持久化模块
@@ -212,6 +249,44 @@ myDB.Set("test", test)
 myDB.SetG("settings", {volume = 0.8, fullscreen = true})
 local settings = myDB.GetG("settings") -- return table {volume = 0.8, fullscreen = true}
 ```
+
+## 示例
+```lua
+YourMod = YourMod or (function()
+-- 使 LuaDB 成为MOD的增强功能，使用户可以选择 LuaDB 实现持久性。
+local db = LuaDB and DB and select(2, pcall(DB.Create,"YourMod"))
+return {
+version = "__VERSION__",
+localData = db and db.L or {},
+globalData = db and db.G or {}
+}
+end)()
+
+function YourMod:Init()
+local settingA = YourMod.localData.settingA
+local settingB = YourMod.globalData.settingB
+-- do something with settings
+end
+
+function YourMod:Save()
+YourMod.localData.settingA = "valueA"
+YourMod.globalData.settingB = { a = 1, b = 2 }
+-- save settings
+end
+
+function YourMod:DoSomething()
+local settingA = YourMod.localData.settingA
+local settingB = YourMod.globalData.settingB
+-- do something with settings
+
+-- update settings if something changed
+YourMod.localData.settingA = settingA
+YourMod.globalData.settingB = settingB
+end
+
+YourMod:Init()
+```
+
 # DB API 文档
 
 ## 全局方法
@@ -231,12 +306,11 @@ local settings = myDB.GetG("settings") -- return table {volume = 0.8, fullscreen
 所有的方法都同时支持 . 调用和 : 调用语法，可以根据个人喜好选择使用
 
 ## 快捷访问
-- `DB.key` / `DB["key"]` - 访问本地键值(与已有方法同名时无效)
-- `DB.L.key` - 总是访问本地键值
-- `DB.G.key` - 总是访问全局键值
-- `DB.Create("Your MOD").key` - 访问命名空间本地键值
-- `DB.Create("Your MOD").L.key` - 总是访问命名空间本地键值
-- `DB.Create("Your MOD").G.key` - 总是访问命名空间全局键值
+- `DB("你的MOD")` - 等同于 `DB.Create("你的MOD")`
+- `DB.key` / `DB["key"]` - 访问本地键值（若存在同名方法则无效）
+- `DB.L.key` / `DB.L["key"]` - 始终访问本地键值，适用于不确定键名是否与现有方法名冲突时
+- `DB.G.key` / `DB.G["key"]` - 始终访问全局键值，适用于不确定键名是否与现有方法名冲突时
+
 
 ## 注意事项
 1. 键名与已有方法同名时，直接访问会优先调用方法而非键值
@@ -324,3 +398,5 @@ LuaDB.Dump()
 
 由于本MOD大量使用反汇编的游戏内部细节，可能会受到游戏更新的影响，如遇到更新后游戏崩溃问题，请尝试删除本MOD文件（或将后缀名
 `.asi`改为其他后缀名）。
+
+## 是如何找到偏移量的？ [如何找到gEnv的地址](https://github.com/muyuanjin/kcd2-mod-docs/blob/main/DISASSEMBLY.md#%E5%A6%82%E4%BD%95%E6%89%BE%E5%88%B0genv%E7%9A%84%E5%9C%B0%E5%9D%80)
