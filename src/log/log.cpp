@@ -1,9 +1,13 @@
 #include "log.h"
 
+#include <chrono>
+
 #include "../kcd2/env.h"
 #include "../kcd2/IConsole.h"
 
 #include <fstream>
+#include <iomanip>
+#include <iostream>
 #include <ostream>
 #include <vector>
 #include <windows.h>
@@ -12,33 +16,38 @@ auto Filename = "kcd2db.log";
 HANDLE ConsoleHandle = nullptr;
 
 // LogLevel 枚举和配置结构
-enum class LogLevel {
+enum class LogLevel
+{
     Debug, Info, Warn, Error
 };
 
-struct LogConfig {
+struct LogConfig
+{
     const char* colorPrefix;
     const char* plainPrefix;
     WORD consoleColor;
 };
 
-LogConfig GetLogConfig(const LogLevel level) {
-    switch (level) {
-        case LogLevel::Debug:
-            return { "$3[DEBUG] ", "[DEBUG] ", FOREGROUND_GREEN };
-        case LogLevel::Info:
-            return { "$5[INFO]  ", "[INFO]  ", FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY };
-        case LogLevel::Warn:
-            return { "$6[WARN]  ", "[WARN]  ", FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY };
-        case LogLevel::Error:
-            return { "$4[ERROR] ", "[ERROR] ", FOREGROUND_RED | FOREGROUND_INTENSITY };
-        default:
-            return { "", "", FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_GREEN };
+LogConfig GetLogConfig(const LogLevel level)
+{
+    switch (level)
+    {
+    case LogLevel::Debug:
+        return {"$3[DEBUG] ", "[DEBUG] ", FOREGROUND_GREEN};
+    case LogLevel::Info:
+        return {"$5[INFO]  ", "[INFO]  ", FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY};
+    case LogLevel::Warn:
+        return {"$6[WARN]  ", "[WARN]  ", FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY};
+    case LogLevel::Error:
+        return {"$4[ERROR] ", "[ERROR] ", FOREGROUND_RED | FOREGROUND_INTENSITY};
+    default:
+        return {"", "", FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_GREEN};
     }
 }
 
 // 通用可变参数处理函数
-static void LogVA(LogLevel level, const char* format, va_list args) {
+static void LogVA(LogLevel level, const char* format, va_list args)
+{
     va_list args_copy;
     va_copy(args_copy, args);
     int len = vsnprintf(nullptr, 0, format, args_copy);
@@ -54,7 +63,8 @@ static void LogVA(LogLevel level, const char* format, va_list args) {
     const auto config = GetLogConfig(level);
 
     // 写入系统控制台
-    if (ConsoleHandle) {
+    if (ConsoleHandle)
+    {
         CONSOLE_SCREEN_BUFFER_INFO originalInfo;
         GetConsoleScreenBufferInfo(ConsoleHandle, &originalInfo);
 
@@ -66,15 +76,19 @@ static void LogVA(LogLevel level, const char* format, va_list args) {
     }
 
     // 写入游戏控制台
-    if (gEnv && gEnv->pConsole) {
+    if (gEnv && gEnv->pConsole)
+    {
         std::string consoleMsg = config.colorPrefix + message + "\n";
         gEnv->pConsole->PrintLine(consoleMsg.c_str());
     }
 
     // 写入日志文件
-    if (std::ofstream logFile(Filename, std::ios_base::app); logFile.is_open()) {
+    if (std::ofstream logFile(Filename, std::ios_base::app); logFile.is_open())
+    {
         logFile << config.plainPrefix << message << std::endl;
-    } else if (ConsoleHandle) {
+    }
+    else if (ConsoleHandle)
+    {
         const auto error = "[ERROR] Could not open log file.\n";
         DWORD written;
         WriteConsoleA(ConsoleHandle, error, strlen(error), &written, nullptr);
@@ -82,14 +96,17 @@ static void LogVA(LogLevel level, const char* format, va_list args) {
 }
 
 // 系统控制台初始化
-bool CheckForConsoleArg() {
+bool CheckForConsoleArg()
+{
     int argc;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (!argv) return false;
 
     bool hasConsole = false;
-    for (int i = 1; i < argc; i++) {
-        if (_wcsicmp(argv[i], L"-console") == 0) {
+    for (int i = 1; i < argc; i++)
+    {
+        if (_wcsicmp(argv[i], L"-console") == 0)
+        {
             hasConsole = true;
             break;
         }
@@ -98,37 +115,85 @@ bool CheckForConsoleArg() {
     return hasConsole;
 }
 
-void InitConsole() {
+void InitConsole()
+{
     if (!CheckForConsoleArg()) return;
+    if (GetConsoleWindow() != nullptr)
+    {
+        AllocConsole();
+    }
 
-    AllocConsole();
     ConsoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
     SetConsoleTitleA("Mod Debug Console");
 
-    const COORD bufferSize = { 120, 9000 };
+    constexpr COORD bufferSize = {120, 9000};
     SetConsoleScreenBufferSize(ConsoleHandle, bufferSize);
 
-    const SMALL_RECT windowSize = { 0, 0, 119, 30 };
+    constexpr SMALL_RECT windowSize = {0, 0, 119, 30};
     SetConsoleWindowInfo(ConsoleHandle, TRUE, &windowSize);
 }
 
 // 日志系统初始化
-void Log_init() {
+void Log_init()
+{
     InitConsole();
-    if (std::ofstream logFile(Filename); logFile) {
-        logFile << "Log file initialized.\n";
+    // 打开日志文件以追加模式
+    if (std::ofstream logFile(Filename, std::ios_base::app); logFile.is_open())
+    {
+        const auto now = std::chrono::system_clock::now();
+        const std::time_t now_time = std::chrono::system_clock::to_time_t(now);
+
+        std::tm tm_struct{};
+        localtime_s(&tm_struct, &now_time);
+
+        logFile << "Log file initialized at "
+            << std::put_time(&tm_struct, "%Y-%m-%d %H:%M:%S")
+            << std::endl;
+    }
+    else
+    {
+        std::cerr << "Error: Unable to open log file: " << Filename << std::endl;
     }
 }
 
 // 各级别日志函数
-void LogDebug(const char* format, ...) { va_list args; va_start(args, format); LogVA(LogLevel::Debug, format, args); va_end(args); }
-void LogInfo(const char* format, ...)  { va_list args; va_start(args, format); LogVA(LogLevel::Info, format, args);  va_end(args); }
-void LogWarn(const char* format, ...)  { va_list args; va_start(args, format); LogVA(LogLevel::Warn, format, args);  va_end(args); }
-void LogError(const char* format, ...) { va_list args; va_start(args, format); LogVA(LogLevel::Error, format, args); va_end(args); }
+void LogDebug(const char* format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    LogVA(LogLevel::Debug, format, args);
+    va_end(args);
+}
+
+void LogInfo(const char* format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    LogVA(LogLevel::Info, format, args);
+    va_end(args);
+}
+
+void LogWarn(const char* format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    LogVA(LogLevel::Warn, format, args);
+    va_end(args);
+}
+
+void LogError(const char* format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    LogVA(LogLevel::Error, format, args);
+    va_end(args);
+}
 
 // 清理资源
-void Log_close() {
-    if (ConsoleHandle) {
+void Log_close()
+{
+    if (ConsoleHandle)
+    {
         FreeConsole();
         ConsoleHandle = nullptr;
     }
