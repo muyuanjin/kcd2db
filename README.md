@@ -112,10 +112,11 @@ All methods support both . Call and : Call syntax, which can be selected accordi
 - `DB.G.key` / `DB.G["key"]` - Always access global key value, If you are not sure whether your key conflicts with an existing method name
 
 ## Notes
-1. When the key name is the same as an existing method, direct access will call the method instead of the key value
-2. When using `Dump()`, $1~9 in strings will be parsed as color codes by the console
+1. Namespace names cannot contain colons, "namespace:" will be used as a key prefix in the database to isolate data from different mods.
+2. When the key name is the same as an existing method, direct access will call the method instead of the key value, use. L or. G instead.
 3. All values will be automatically JSON encoded/decoded (the game has built-in json.lua V0.1.1).
-4. Namespaces will automatically add a ":" suffix
+4. The JSON string size of a single object should not exceed 1 billion bytes (approximately 953MB), otherwise Sqlite will report an error "string or blob too big," making it impossible to store.
+5. When using `Dump()`, $0~9 in strings will be parsed as color codes by the console. The in-game console cannot display non-ASCII characters, and DEBUG log data will be truncated to prevent lag.
 
 ### Save-associated APIs
 
@@ -313,10 +314,11 @@ YourMod:Init()
 
 
 ## 注意事项
-1. 键名与已有方法同名时，直接访问会优先调用方法而非键值
-2. 使用`Dump()`时，字符串中的$1~9会被控制台解析为颜色代码
-3. 所有值会自动进行JSON编码/解码(游戏内置了 json.lua v0.1.1)
-4. 命名空间会自动添加":"后缀
+1. 命名空间名称不能包含冒号，“namespace:”将作为数据库中的键前缀，用于隔离不同模组的数据。
+2. 当键名与现有方法同名时，直接访问将调用方法而不是键值，请使用.L或.G代替。
+3. 所有值将自动进行JSON编码/解码（游戏内置了json.lua V0.1.1）。
+4. 单个对象的JSON字符串大小不应超过10亿字节（约953MB），否则Sqlite会报错“字符串或二进制数据过大”，导致无法存储。
+5. 使用`Dump()`时，字符串中的$0~9将被控制台解析为颜色代码。游戏内控制台无法显示非ASCII字符，DEBUG日志数据将被截断以防止卡顿。
 
 ### 存档关联API
 
