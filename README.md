@@ -1,14 +1,17 @@
-# LuaDB - Kingdom Come Deliverance II Lua Persistence Module
+# [LuaDB](https://www.nexusmods.com/kingdomcomedeliverance2/mods/1523) - Kingdom Come Deliverance II Lua Persistence Module  
 
-[中文](#简介)
+[中文](#中文)
 
 ## Introduction
 
 This module provides **SQLite-based Lua data persistence** for Kingdom Come: Deliverance II mod developers, supporting
 two storage modes:
 
-- **Global Storage**: Persists data across game saves (APIs end with "G") with automatic save/load
-- **Save-associated Storage**: Data bound to game save slots with automatic save/load synchronization
+- **Global** : Data persists across all game saves (independent of the game save).
+
+- **Local** : Bound to the game save, data is associated with a specific game save file:
+  - **Automatically saved** when the game is saved.
+  - **Automatically loaded** when the game loads that save.
 
 ## Installation Requirements
 
@@ -202,15 +205,18 @@ after game updates, try removing the mod file (or rename `.asi` extension to dis
 ## Want to know how I found the offset? Check out this [How to find the address of gEnv](https://github.com/muyuanjin/kcd2-mod-docs/blob/main/DISASSEMBLY.md)
 
 ---
-
-# LuaDB - 天国拯救2 Lua 数据持久化模块
+<a name="中文"></a>
+# [LuaDB](https://www.nexusmods.com/kingdomcomedeliverance2/mods/1523) - 天国拯救2 Lua 数据持久化模块
 
 ## 简介
 
 本模块为《天国拯救2》Mod开发者提供基于Sqlite 的 Lua 数据存储解决方案，支持两种存储模式：
 
-- **全局存储**：跨存档永久保存数据（API以G结尾）自动保存/加载
-- **存档关联存储**：数据随游戏存档保存/加载
+- **全局**：数据在所有游戏存档中持久存在（独立于游戏存档）。
+
+- **本地**：绑定到游戏存档，数据与特定的游戏存档文件关联：
+    - 游戏保存时**自动保存**。
+    - 游戏加载该存档时**自动加载**。
 
 ## 安装要求
 
