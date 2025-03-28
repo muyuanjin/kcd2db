@@ -5,7 +5,6 @@
 #include "LuaDB.h"
 #include "../kcd2/IConsole.h"
 #include "../kcd2/IGame.h"
-#include <optional>
 #include <ranges>
 #include <sstream>
 #include <unordered_set>
@@ -156,7 +155,7 @@ void CheckAndVacuum(SQLite::Database& db)
 }
 
 // Database.cpp 优化版本
-LuaDB::LuaDB(SSystemGlobalEnvironment* env) :
+LuaDB::LuaDB(const SSystemGlobalEnvironment* env) :
     m_db(std::make_unique<SQLite::Database>("./kcd2db.db", SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE)),
     m_lastSaveTime(std::chrono::steady_clock::now())
 {
