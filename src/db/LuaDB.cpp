@@ -9,6 +9,7 @@
 #include <sstream>
 #include <unordered_set>
 #include <string>
+#include "../lua/db.h"
 
 std::string substring(const std::string& input, const long long max_length = 100)
 {
@@ -154,13 +155,16 @@ void CheckAndVacuum(SQLite::Database& db)
     }
 }
 
+LuaDB::~LuaDB()
+{
+    LogDebug("LuaDB destructor called");
+}
+
 // Database.cpp 优化版本
-LuaDB::LuaDB(const SSystemGlobalEnvironment* env) :
+LuaDB::LuaDB() :
     m_db(std::make_unique<SQLite::Database>("./kcd2db.db", SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE)),
     m_lastSaveTime(std::chrono::steady_clock::now())
 {
-    CScriptableBase::Init(env->pScriptSystem, env->pSystem);
-    SetGlobalName("LuaDB");
 
     ExecuteTransaction([](SQLite::Database& db)
     {
@@ -183,29 +187,59 @@ LuaDB::LuaDB(const SSystemGlobalEnvironment* env) :
             )
         )");
     });
-    env->pGame->GetIGameFramework()->RegisterListener(this, "LuaDB", FRAMEWORKLISTENERPRIORITY_DEFAULT);
+
     SyncCacheWithDatabase();
+
+    CheckAndVacuum(*m_db);
+    LogDebug("LuaDB vacuum check completed");
+}
+bool LuaDB::isRegistered() const
+{
+    std::lock_guard lock(m_mutex);
+    return m_pSS != nullptr;
+}
+
+void LuaDB::RegisterLuaAPI()
+{
+    std::lock_guard lock(m_mutex);
+    CScriptableBase::Init(gEnv->pScriptSystem, gEnv->pSystem);
+    SetGlobalName("LuaDB");
 #undef SCRIPT_REG_CLASSNAME
 #define SCRIPT_REG_CLASSNAME &LuaDB::
-
+    LogDebug("LuaDB data initialized");
     // 存档关联的数据方法
     SCRIPT_REG_TEMPLFUNC(Set, "key, value");
+    LogDebug("Registered LuaDB method Set");
     SCRIPT_REG_TEMPLFUNC(Get, "key");
+    LogDebug("Registered LuaDB method Get");
     SCRIPT_REG_TEMPLFUNC(Del, "key");
+    LogDebug("Registered LuaDB method Del");
     SCRIPT_REG_TEMPLFUNC(Exi, "key");
+    LogDebug("Registered LuaDB method Exi");
     SCRIPT_REG_TEMPLFUNC(All, "");
+    LogDebug("Registered LuaDB method All");
 
     // 全局数据方法（跨存档）
     SCRIPT_REG_TEMPLFUNC(SetG, "key, value");
+    LogDebug("Registered LuaDB method SetG");
     SCRIPT_REG_TEMPLFUNC(GetG, "key");
+    LogDebug("Registered LuaDB method GetG");
     SCRIPT_REG_TEMPLFUNC(DelG, "key");
+    LogDebug("Registered LuaDB method DelG");
     SCRIPT_REG_TEMPLFUNC(ExiG, "key");
+    LogDebug("Registered LuaDB method ExiG");
     SCRIPT_REG_TEMPLFUNC(AllG, "");
+    LogDebug("Registered LuaDB method AllG");
 
     // 工具方法
     SCRIPT_REG_TEMPLFUNC(Dump, "");
+    LogDebug("Registered LuaDB method Dump");
 
-    CheckAndVacuum(*m_db);
+    m_pSS->ExecuteBuffer(db_lua, strlen(db_lua), "db.lua");
+    LogInfo("DB lua API loaded");
+    gEnv->pGame->GetIGameFramework()->RegisterListener(this, "LuaDB", FRAMEWORKLISTENERPRIORITY_DEFAULT);
+    LogInfo("LuaDB registered as game framework listener");
+    LogInfo("LuaDB loading completed.");
 }
 
 void LuaDB::SyncCacheWithDatabase()

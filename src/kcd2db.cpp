@@ -10,7 +10,6 @@
 #include "kcd2/env.h"
 #include "kcd2/IGame.h"
 #include "log/log.h"
-#include "lua/db.h"
 
 std::optional<uintptr_t> find_env_addr()
 {
@@ -19,7 +18,7 @@ std::optional<uintptr_t> find_env_addr()
     // 持续尝试查找模块
     while (!LM_FindModule(CLIENT_DLL, &module))
     {
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        std::this_thread::yield();
     }
     // 通常会找到两个地址，不过两个地址其实通过RIP之后的偏移是一样的，都是指向 gEnv->pConsole 的 qword_1848A7C68
     const auto pattern = "48 8B 0D ?? ?? ?? ?? 48 8D 15 ?? ?? ?? ?? 45 33 C9 45 33 C0 4C 8B 11";
@@ -47,35 +46,74 @@ std::optional<uintptr_t> find_env_addr()
     return console_addr - 0xA8;
 }
 
+using CompleteInitFunc = bool(__thiscall*)(IGame*);
+constexpr int COMPLETE_INIT_INDEX = 4; // 第5个函数
+// 原始函数指针
+static CompleteInitFunc OriginalCompleteInit = nullptr;
+static std::atomic<LuaDB*> gLuaDB{nullptr};
+// 钩子函数
+bool __thiscall Hooked_CompleteInit(IGame* pThis)
+{
+    LogDebug("Hooked_CompleteInit");
+    LuaDB* luaDB = nullptr;
+    while ((luaDB = gLuaDB.load(std::memory_order_acquire)) == nullptr)
+    {
+        std::this_thread::yield();
+    }
+    luaDB->RegisterLuaAPI();
+    LogInfo("Hooked_CompleteInit completed");
+    return OriginalCompleteInit(pThis);
+}
+
 void start()
 {
     LogDebug("Main thread started");
     if (const auto env_addr = find_env_addr())
     {
-        if (!env_addr.has_value())
-        {
-            LogError("Failed to find environment address");
-            return;
-        }
         LogDebug("Found environment address: 0x%llX", *env_addr);
 
-        auto* env_ptr = reinterpret_cast<SSystemGlobalEnvironment*>(env_addr.value());
-        while (env_ptr->pGame == nullptr
-            || env_ptr->pGame->GetIGameFramework() == nullptr
-            || env_ptr->pScriptSystem == nullptr
-            || env_ptr->pConsole == nullptr)
+        const auto* env_ptr = reinterpret_cast<SSystemGlobalEnvironment*>(env_addr.value());
+
+        while (env_ptr->pGame == nullptr)
         {
-            Sleep(200);
+            std::this_thread::yield();
         }
         LogDebug("Game Started");
 
         gEnv = *env_ptr;
+        IGame* pGame = gEnv->pGame;
 
-        const auto db = new LuaDB(env_ptr);
-        LogInfo("Database initialized...%s", db->getName());
+        void** vTable = *reinterpret_cast<void***>(pGame);
+        DWORD oldProtect;
+        do
+        {
+            VirtualProtect(&vTable[COMPLETE_INIT_INDEX], sizeof(void*), PAGE_EXECUTE_READWRITE, &oldProtect);
+            OriginalCompleteInit = static_cast<CompleteInitFunc>(vTable[COMPLETE_INIT_INDEX]);
+        }
+        while (InterlockedCompareExchangePointer(
+            &vTable[COMPLETE_INIT_INDEX],
+            reinterpret_cast<PVOID>(&Hooked_CompleteInit),
+            reinterpret_cast<PVOID>(OriginalCompleteInit)) != OriginalCompleteInit);
 
-        env_ptr->pScriptSystem->ExecuteBuffer(db_lua, strlen(db_lua), "db.lua");
-        LogInfo("DB lua API loaded");
+        VirtualProtect(&vTable[COMPLETE_INIT_INDEX], sizeof(void*), oldProtect, nullptr);
+
+        LogDebug("Hooked CompleteInit function");
+        const auto luaDB = new LuaDB();
+        gLuaDB.store(luaDB, std::memory_order_release);
+        LogInfo("LuaDB initialized");
+
+        while (env_ptr->pGame->GetIGameFramework() == nullptr
+            || !env_ptr->pGame->GetIGameFramework()->IsGameStarted())
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        LogDebug("Game Framework Started");
+
+        if (!luaDB->isRegistered())
+        {
+            LogWarn("LuaDB is not registered, will register now");
+            luaDB->RegisterLuaAPI();
+        }
     }
     else
     {
@@ -114,7 +152,7 @@ BOOL APIENTRY DllMain(const HMODULE hModule, const DWORD reason, LPVOID lpReserv
             Log_init();
             LogDebug("DLL attached");
             // 创建主工作线程
-            if (HANDLE hThread = CreateThread(nullptr, 0, main_thread, nullptr, 0, nullptr))
+            if (const HANDLE hThread = CreateThread(nullptr, 0, main_thread, nullptr, 0, nullptr))
             {
                 CloseHandle(hThread);
             }
@@ -128,6 +166,15 @@ BOOL APIENTRY DllMain(const HMODULE hModule, const DWORD reason, LPVOID lpReserv
     else if (reason == DLL_PROCESS_DETACH)
     {
         Log_close();
+        if (gEnv && gEnv->pGame)
+        {
+            void** vTable = *reinterpret_cast<void***>(gEnv->pGame);
+            // 恢复原函数
+            DWORD oldProtect;
+            VirtualProtect(&vTable[COMPLETE_INIT_INDEX], sizeof(void*), PAGE_READWRITE, &oldProtect);
+            vTable[COMPLETE_INIT_INDEX] = OriginalCompleteInit;
+            VirtualProtect(&vTable[COMPLETE_INIT_INDEX], sizeof(void*), oldProtect, nullptr);
+        }
     }
     return TRUE;
 }

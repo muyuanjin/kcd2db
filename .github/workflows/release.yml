@@ -3,11 +3,11 @@ name: Release
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
-    paths:
-      - 'src/**'
-      - 'CMakeLists.txt'
+    tags:
+      - '*.*.*'
+      - 'v*.*.*'
+      - '*.*.*-*'
+      - 'v*.*.*-*'
 
 permissions:
   contents: write
@@ -53,14 +53,12 @@ jobs:
           New-Item -ItemType Directory -Path release-package
           Copy-Item build\Release\*.asi release-package
           Copy-Item asi-loader\*.dll release-package
-          Compress-Archive -Path release-package\* -DestinationPath kcd2db-${{ steps.date.outputs.formattedDate }}.zip
+          Compress-Archive -Path release-package\* -DestinationPath kcd2db-${{ github.REF_NAME }}.zip
 
       - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
-          name: KCD2DB ${{ steps.date.outputs.formattedDate }}
-          tag_name: release-${{ steps.date.outputs.formattedDate }}
-          files: kcd2db-${{ steps.date.outputs.formattedDate }}.zip
+          files: kcd2db-${{ github.REF_NAME }}.zip
           make_latest: true
           generate_release_notes: true
           body: |
