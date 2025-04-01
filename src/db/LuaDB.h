@@ -94,7 +94,10 @@ private:
 
 class LuaDB final : public CScriptableBase, public IGameFrameworkListener {
 public:
-    explicit LuaDB(const SSystemGlobalEnvironment* env);
+    explicit LuaDB();
+    ~LuaDB() override;
+    void RegisterLuaAPI();
+    bool isRegistered() const;
 
     // Lua API
     int Set(IFunctionHandler* pH)  { return GenericAccess(pH, AccessType::Set); }

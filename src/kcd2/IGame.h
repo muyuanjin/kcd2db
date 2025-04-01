@@ -68,8 +68,6 @@ struct IGame
 	//! Type to represent saved game names, keeping the string on the stack if possible.
 	typedef CryStackStringT<char, 256> TSaveGameName;
 
-	virtual void pad0() = 0;
-
 	// <interfuscator:shuffle>
 	virtual ~IGame(){}
 
@@ -108,6 +106,8 @@ struct IGame
 	//! Called on the game when the local player id is set.
 	//! \param playerId Entity Id of the local player.
 	virtual void PlayerIdSet(EntityId playerId) = 0;
+
+	virtual void pad0() = 0;
 
 	//! Called when playerID is reset in GameChannel
 	virtual void OnClearPlayerIds() = 0;  //原本在 create_save_game_name 上面，但是KCD2的内存布局和代码不一致，所以移动过来占位
