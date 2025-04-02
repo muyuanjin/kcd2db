@@ -84,10 +84,12 @@ void start()
         IGame* pGame = gEnv->pGame;
 
         void** vTable = *reinterpret_cast<void***>(pGame);
-        DWORD oldProtect;
+        DWORD initialOldProtect;
+        VirtualProtect(&vTable[COMPLETE_INIT_INDEX], sizeof(void*),PAGE_EXECUTE_READWRITE, &initialOldProtect);
         do
         {
-            VirtualProtect(&vTable[COMPLETE_INIT_INDEX], sizeof(void*), PAGE_EXECUTE_READWRITE, &oldProtect);
+            DWORD tempOldProtect;
+            VirtualProtect(&vTable[COMPLETE_INIT_INDEX], sizeof(void*),PAGE_EXECUTE_READWRITE, &tempOldProtect);
             OriginalCompleteInit = static_cast<CompleteInitFunc>(vTable[COMPLETE_INIT_INDEX]);
         }
         while (InterlockedCompareExchangePointer(
@@ -95,7 +97,7 @@ void start()
             reinterpret_cast<PVOID>(&Hooked_CompleteInit),
             reinterpret_cast<PVOID>(OriginalCompleteInit)) != OriginalCompleteInit);
 
-        VirtualProtect(&vTable[COMPLETE_INIT_INDEX], sizeof(void*), oldProtect, nullptr);
+        VirtualProtect(&vTable[COMPLETE_INIT_INDEX], sizeof(void*), initialOldProtect, nullptr);
 
         LogDebug("Hooked CompleteInit function");
         const auto luaDB = new LuaDB();
