@@ -27,9 +27,10 @@ jobs:
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
+      # 同时禁用 cppcheck 和 cpplint
       - name: Configure CMake
         run: |
-          cmake -B build -G "Visual Studio 17 2022" -DSQLITECPP_RUN_CPPLINT=OFF
+          cmake -B build -G "Visual Studio 17 2022" -DSQLITECPP_RUN_CPPCHECK=OFF -DSQLITECPP_RUN_CPPLINT=OFF
 
       - name: Build
         run: |
