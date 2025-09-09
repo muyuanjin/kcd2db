@@ -49,7 +49,7 @@ ScriptValue parseValue(const int type, const std::string& value)
     }
     catch (...)
     {
-        LogWarn("Failed to parse value: %s", value);
+        LogWarn("Failed to parse value: %s", value.c_str());
         return {};
     }
 }
@@ -165,7 +165,6 @@ LuaDB::LuaDB() :
     m_db(std::make_unique<SQLite::Database>("./kcd2db.db", SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE)),
     m_lastSaveTime(std::chrono::steady_clock::now())
 {
-
     ExecuteTransaction([](SQLite::Database& db)
     {
         db.exec(R"(
@@ -193,6 +192,7 @@ LuaDB::LuaDB() :
     CheckAndVacuum(*m_db);
     LogDebug("LuaDB vacuum check completed");
 }
+
 bool LuaDB::isRegistered() const
 {
     std::lock_guard lock(m_mutex);
@@ -280,57 +280,68 @@ void LuaDB::SyncCacheWithDatabase()
 int LuaDB::GenericAccess(IFunctionHandler* pH, const AccessType action, const bool isGlobal)
 {
     constexpr auto ArgError = [](auto* handler) { return handler->EndFunction(false); };
-    const char* key = nullptr;
-    ScriptAnyValue value;
-
-    if ((action != AccessType::All && !pH->GetParam(1, key)) || (action == AccessType::Set && !pH->
-        GetParamAny(2, value)))
+    try
     {
-        LogWarn("Invalid arguments");
-        return ArgError(pH);
+        const char* key = nullptr;
+        ScriptAnyValue value;
+
+        if ((action != AccessType::All && !pH->GetParam(1, key)) || (action == AccessType::Set && !pH->
+            GetParamAny(2, value)))
+        {
+            LogWarn("Invalid arguments");
+            return ArgError(pH);
+        }
+        std::lock_guard lock(m_mutex);
+        auto& cache = isGlobal ? m_globalCache : m_saveCache;
+
+        switch (action)
+        {
+        case AccessType::Set:
+            {
+                const auto it = ScriptValue(value);
+                cache[key] = it;
+                LogDebug(isGlobal ? "Set Global %s = %s" : "Set %s = %s", key, formatValue(it).c_str());
+                if (isGlobal)
+                {
+                    m_globalDirty = true;
+                }
+                return pH->EndFunction(true);
+            }
+        case AccessType::Get:
+            {
+                const auto it = cache.find(key);
+                return it != cache.end() ? pH->EndFunction(it->second.toAnyValue()) : pH->EndFunction();
+            }
+        case AccessType::Del:
+            {
+                const bool erased = cache.erase(key) > 0;
+                LogDebug(isGlobal ? "Delete Global %s: %s" : "Delete %s: %s", key, erased ? "OK" : "Not found");
+                if (isGlobal && erased)
+                {
+                    m_globalDirty = true;
+                }
+                return pH->EndFunction(erased);
+            }
+        case AccessType::Exi:
+            return pH->EndFunction(cache.contains(key));
+        case AccessType::All:
+            {
+                const auto table = m_pSS->CreateTable();
+                for (const auto& [k, v] : cache)
+                {
+                    table->SetValue(k.c_str(), v.toAnyValue());
+                }
+                return pH->EndFunction(table);
+            }
+        }
     }
-    std::lock_guard lock(m_mutex);
-    auto& cache = isGlobal ? m_globalCache : m_saveCache;
-
-    switch (action)
+    catch (const std::exception& e)
     {
-    case AccessType::Set:
-        {
-            const auto it = ScriptValue(value);
-            cache[key] = it;
-            LogDebug(isGlobal ? "Set Global %s = %s" : "Set %s = %s", key, formatValue(it).c_str());
-            if (isGlobal)
-            {
-                m_globalDirty = true;
-            }
-            return pH->EndFunction(true);
-        }
-    case AccessType::Get:
-        {
-            const auto it = cache.find(key);
-            return it != cache.end() ? pH->EndFunction(it->second.toAnyValue()) : pH->EndFunction();
-        }
-    case AccessType::Del:
-        {
-            const bool erased = cache.erase(key) > 0;
-            LogDebug(isGlobal ? "Delete Global %s: %s" : "Delete %s: %s", key, erased ? "OK" : "Not found");
-            if (isGlobal && erased)
-            {
-                m_globalDirty = true;
-            }
-            return pH->EndFunction(erased);
-        }
-    case AccessType::Exi:
-        return pH->EndFunction(cache.contains(key));
-    case AccessType::All:
-        {
-            const auto table = m_pSS->CreateTable();
-            for (const auto& [k, v] : cache)
-            {
-                table->SetValue(k.c_str(), v.toAnyValue());
-            }
-            return pH->EndFunction(table);
-        }
+        LogError("LuaDB: Exception in GenericAccess: %s", e.what());
+    }
+    catch (...)
+    {
+        LogError("LuaDB: Unknown exception in GenericAccess");
     }
     return ArgError(pH);
 }
@@ -420,7 +431,7 @@ void LuaDB::OnPostUpdate(float /*fDeltaTime*/)
                 }
                 catch (const std::exception& e)
                 {
-                    LogError("Global save failed for key %s: %s", k, e.what());
+                    LogError("Global save failed for key %s: %s", k.c_str(), e.what());
                 }
             }
         });
