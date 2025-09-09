@@ -2,7 +2,6 @@
 #include <cstdio>
 #include <mutex>
 #include <optional>
-#include <cassert>
 #include <libmem/libmem.h>
 
 #define KCD2_ENV_IMPORT
@@ -11,39 +10,123 @@
 #include "kcd2/IGame.h"
 #include "log/log.h"
 
+// 将字节序列转换为 libmem 兼容的模式
+std::string bytes_to_pattern(const unsigned char* bytes, size_t size)
+{
+    char hex_map[] = "0123456789ABCDEF";
+    std::string pattern;
+    for (size_t i = 0; i < size; ++i)
+    {
+        pattern += hex_map[(bytes[i] & 0xF0) >> 4];
+        pattern += hex_map[bytes[i] & 0x0F];
+        if (i < size - 1)
+        {
+            pattern += " ";
+        }
+    }
+    return pattern;
+}
+
 std::optional<uintptr_t> find_env_addr()
 {
     lm_module_t module;
     constexpr auto CLIENT_DLL = "WHGame.DLL";
-    // 持续尝试查找模块
     while (!LM_FindModule(CLIENT_DLL, &module))
     {
         std::this_thread::yield();
     }
-    // 通常会找到两个地址，不过两个地址其实通过RIP之后的偏移是一样的，都是指向 gEnv->pConsole 的 qword_1848A7C68
-    const auto pattern = "48 8B 0D ?? ?? ?? ?? 48 8D 15 ?? ?? ?? ?? 45 33 C9 45 33 C0 4C 8B 11";
-    const auto scan_address = LM_SigScan(pattern, module.base, module.size);
-    if (!scan_address)
+    // --- 步骤 1: 找到 "exec autoexec.cfg" 字符串的地址 ---
+    constexpr std::string_view search_string = "exec autoexec.cfg";
+    const auto string_pattern = bytes_to_pattern(
+        reinterpret_cast<const unsigned char*>(search_string.data()),
+        search_string.length()
+    );
+    LogInfo("Scanning for anchor string pattern: %s", string_pattern.c_str());
+    const uintptr_t string_addr = LM_SigScan(string_pattern.c_str(), module.base, module.size);
+    if (!string_addr)
     {
-        LogError("Signature scan failed");
+        LogError("Could not find the anchor string 'exec autoexec.cfg'.");
         return std::nullopt;
     }
+    LogInfo("Found anchor string at: 0x%llX", string_addr);
+    // --- 步骤 2: 找到引用该字符串的 LEA 指令 ---
+    // lea rdx, [rip + offset] 的机器码是 48 8D 15 [offset]
+    uintptr_t lea_instruction_addr = 0;
+    uintptr_t scan_start = module.base;
+    while (true)
+    {
+        uintptr_t potential_lea = LM_SigScan("48 8D 15 ? ? ? ?", scan_start, module.size - (scan_start - module.base));
+        if (!potential_lea)
+        {
+            LogError("Could not find any cross-references to the anchor string.");
+            return std::nullopt;
+        }
+        int32_t rip_offset;
+        LM_ReadMemory(potential_lea + 3, reinterpret_cast<lm_byte_t*>(&rip_offset), sizeof(rip_offset));
+
+        // 计算 lea 指令引用的目标地址
+        uintptr_t referenced_addr = potential_lea + 7 + rip_offset;
+        if (referenced_addr == string_addr)
+        {
+            lea_instruction_addr = potential_lea;
+            LogInfo("Found LEA instruction referencing the string at: 0x%llX", lea_instruction_addr);
+            break; // 找到了正确的引用
+        }
+
+        // 从下一个地址继续搜索，避免无限循环
+        scan_start = potential_lea + 1;
+    }
+    // --- 步骤 3: 验证上下文并计算 gEnv 地址 ---
+    uintptr_t pConsole_mov_addr = 0;
+    // 检查是否为 V1.4: lea 指令前有 'mov r10, [rdx+118h]' (4C 8B 92 18 01 00 00)
+    unsigned char v1_6_context_bytes[7];
+    if (LM_ReadMemory(lea_instruction_addr - 7, v1_6_context_bytes, 7) &&
+        memcmp(v1_6_context_bytes, "\x4C\x8B\x92\x18\x01\x00\x00", 7) == 0)
+    {
+        LogInfo("Version context matches V1.4.");
+        // 在 V1.4 中, 'mov rcx, cs:qword_...' 在 lea 指令前 0x11 (17) 字节
+        // lea (7 bytes) + call (3 bytes) + mov rdx (3 bytes) + xor (3 bytes) + xor (3 bytes) = 19 bytes? No, let's use your IDA output.
+        // From your IDA: 0x180C9D574 (lea) - 0x180C9D55D (mov) = 0x17 bytes. Wait, 0x180C9D564 is xor.
+        // 0x180C9D574 (lea) - 0x180C9D55D (mov rcx, cs:qword_184916868) = 0x17 bytes. This is the one.
+        pConsole_mov_addr = lea_instruction_addr - 0x17;
+    }
+    else
+    {
+        // 检查是否为 V1.3: lea 指令后有 'call qword ptr [r10+118h]' (41 FF 92 18 01 00 00)
+        // 并且 lea 之前是 'mov rcx, cs:qword_...'
+        unsigned char v1_3_context_bytes[7];
+        // From your IDA: 0x180AF7DC0 (call) is after 0x180AF7DB0 (lea)
+        if (LM_ReadMemory(lea_instruction_addr + 10, v1_3_context_bytes, 7) &&
+            memcmp(v1_3_context_bytes, "\x41\xFF\x92\x18\x01\x00\x00", 7) == 0)
+        {
+            LogInfo("Version context matches V1.3.");
+            // 在 V1.3 中, 'mov rcx, cs:qword_...' 在 lea 指令前 0x19 (25) 字节
+            // From your IDA: 0x180AF7DB0 (lea) - 0x180AF7DA9 (mov) = 0x7 bytes. Let's re-check.
+            // Ah, the target is `mov rcx, cs:qword_1848A7C68` at 180AF7DA9.
+            // The `lea` is at 180AF7DB0. So `180AF7DB0 - 180AF7DA9 = 7`.
+            pConsole_mov_addr = lea_instruction_addr - 7;
+        }
+    }
+    if (!pConsole_mov_addr)
+    {
+        LogError("Could not identify version context around the LEA instruction.");
+        return std::nullopt;
+    }
+    LogInfo("Found pConsole MOV instruction at: 0x%llX", pConsole_mov_addr);
+    // 现在我们定位到了 'mov rcx, [rip + offset]' 指令，计算地址
     int32_t rip_offset;
-    if (!LM_ReadMemory(scan_address + 3, reinterpret_cast<lm_byte_t*>(&rip_offset), sizeof(rip_offset)))
+    if (!LM_ReadMemory(pConsole_mov_addr + 3, reinterpret_cast<lm_byte_t*>(&rip_offset), sizeof(rip_offset)))
     {
-        LogError("Failed to read RIP offset");
+        LogError("Failed to read RIP offset from the MOV instruction.");
         return std::nullopt;
     }
-    // RIP 相对寻址公式：TargetAddress = RIP + Offset
-    // RIP = scan_address + 操作码 48 8B 0D 占 3 字节 + 偏移占 4 字节
-    const auto console_addr = scan_address + 3 + 4 + rip_offset;
-    // 根据1.2.2版本的 WHGame.DLL IDA Pro 分析结果 ，p console 的地址偏移是 0x48A7C68
-    // lea rdx, aExecAutoexecCf ; "exec autoexec.cfg" 命令上一行就是 pConsole 的qword地址
-    // 因为 gEnv 对象是全局变量被放在了.data 段, gEnv->pConsole->ExecuteString("exec autoexec.cfg");
-    // gEnv->pConsole 被内联
-    assert(console_addr == module.base + 0x48A7C68 && "Address verification failed");
-    // pConsole 是 gEnv 的第 22 个成员，往前偏移21个指针，21 * 8 = 168 = 0xA8
-    return console_addr - 0xA8;
+    // RIP 相对寻址: 目标地址 = 指令结束地址 + 偏移
+    // 指令结束地址 = pConsole_mov_addr + 7 (3字节操作码 + 4字节偏移)
+    const uintptr_t console_ptr_addr = pConsole_mov_addr + 7 + rip_offset;
+    // pConsole 是 gEnv 的成员，我们找到了 gEnv->pConsole 的地址
+    // gEnv 的基地址 = (&gEnv->pConsole) - offsetof(SSystemGlobalEnvironment, pConsole)
+    // 偏移是 0xA8
+    return console_ptr_addr - 0xA8;
 }
 
 using CompleteInitFunc = bool(__thiscall*)(IGame*);
