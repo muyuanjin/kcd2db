@@ -11,6 +11,53 @@
 #include <string>
 #include "../lua/db.h"
 
+namespace
+{
+class TempTableGuard
+{
+public:
+    TempTableGuard(SQLite::Database& db, const std::string& tableName, const std::string& schema) :
+        m_db(db),
+        m_tableName(tableName),
+        m_active(false)
+    {
+        const std::string createSql = "CREATE TEMP TABLE IF NOT EXISTS " + m_tableName + " " + schema;
+        SQLite::Statement createStmt(m_db, createSql.c_str());
+        createStmt.exec();
+        m_active = true;
+    }
+
+    ~TempTableGuard()
+    {
+        if (!m_active)
+        {
+            return;
+        }
+        try
+        {
+            const std::string dropSql = "DROP TABLE IF EXISTS " + m_tableName;
+            SQLite::Statement dropStmt(m_db, dropSql.c_str());
+            dropStmt.exec();
+        }
+        catch (...)
+        {
+        }
+    }
+
+    void Clear() const
+    {
+        const std::string clearSql = "DELETE FROM " + m_tableName;
+        SQLite::Statement clearStmt(m_db, clearSql.c_str());
+        clearStmt.exec();
+    }
+
+private:
+    SQLite::Database& m_db;
+    std::string m_tableName;
+    bool m_active;
+};
+}
+
 std::string substring(const std::string& input, const long long max_length = 100)
 {
     if (input.length() < max_length)
@@ -265,7 +312,7 @@ void LuaDB::SyncCacheWithDatabase()
                 parseValue(typeCol.getInt(), valueCol.getString())
             );
         }
-        LogInfo("Loaded %d entries from %s", cache.size(), savefile.empty() ? "[Global]" : savefile.c_str());
+        LogInfo("Loaded %zu entries from %s", cache.size(), savefile.empty() ? "[Global]" : savefile.c_str());
     };
 
     m_globalCache.clear();
@@ -357,8 +404,8 @@ void LuaDB::OnLoadGame(ILoadGame* pLoadGame)
 
 void LuaDB::OnSaveGame(ISaveGame* pSaveGame)
 {
-    const auto newSave = pSaveGame->GetFileName();
-    LogInfo("Save Game : %s", newSave);
+    const std::string newSave = pSaveGame->GetFileName();
+    LogInfo("Save Game : %s", newSave.c_str());
     // 将 m_saveCache 写入数据库
     std::lock_guard lock(m_mutex);
     if (!m_saveCache.empty())
@@ -366,11 +413,11 @@ void LuaDB::OnSaveGame(ISaveGame* pSaveGame)
         if (const int successCount = BatchOperation(*m_db, m_saveCache, newSave);
             successCount == m_saveCache.size())
         {
-            LogInfo("Data saved: %d entries", m_saveCache.size());
+            LogInfo("Data saved: %zu entries", m_saveCache.size());
         }
         else
         {
-            LogError("Save data error: %d/%d entries saved", successCount, m_saveCache.size());
+            LogError("Save data error: %d/%zu entries saved", successCount, m_saveCache.size());
         }
     }
     m_currentSaveGame = newSave;
@@ -388,14 +435,11 @@ void LuaDB::OnPostUpdate(float /*fDeltaTime*/)
     try
     {
         int successCount = 0;
-        ExecuteTransaction([this, &successCount](const SQLite::Database& db)
+        ExecuteTransaction([this, &successCount](SQLite::Database& db)
         {
-            // 创建临时表来保存当前所有的键
-            SQLite::Statement createTempStmt(db, "CREATE TEMP TABLE TempKeys (key TEXT PRIMARY KEY)");
-            createTempStmt.exec();
-            // 清空临时表（如果之前存在）
-            SQLite::Statement clearTempStmt(db, "DELETE FROM TempKeys");
-            clearTempStmt.exec();
+            // 创建临时表来保存当前所有的键，并在作用域结束后自动释放
+            TempTableGuard tempKeys(db, "TempKeys", "(key TEXT PRIMARY KEY)");
+            tempKeys.Clear();
             // 将当前缓存中的键插入临时表
             SQLite::Statement insertTempStmt(db, "INSERT INTO TempKeys (key) VALUES (?)");
             for (const auto& k : m_globalCache | std::views::keys)
@@ -408,9 +452,6 @@ void LuaDB::OnPostUpdate(float /*fDeltaTime*/)
             SQLite::Statement deleteStmt(db,
                                          "DELETE FROM Store WHERE savefile = '' AND key NOT IN (SELECT key FROM TempKeys)");
             deleteStmt.exec();
-            // 删除临时表
-            SQLite::Statement dropTempStmt(db, "DROP TABLE TempKeys");
-            dropTempStmt.exec();
 
             // 插入或更新现有的键
             SQLite::Statement stmt(db,
@@ -438,11 +479,11 @@ void LuaDB::OnPostUpdate(float /*fDeltaTime*/)
         m_lastSaveTime = steady_clock::now();
         if (successCount == m_globalCache.size())
         {
-            LogInfo("Global data saved: %d entries", m_globalCache.size());
+            LogInfo("Global data saved: %zu entries", m_globalCache.size());
         }
         else
         {
-            LogError("Global save failed: %d/%d entries saved", successCount, m_globalCache.size());
+            LogError("Global save failed: %d/%zu entries saved", successCount, m_globalCache.size());
         }
     }
     catch (const std::exception& e)
