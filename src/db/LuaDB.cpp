@@ -18,21 +18,15 @@ class TempTableGuard
 public:
     TempTableGuard(SQLite::Database& db, const std::string& tableName, const std::string& schema) :
         m_db(db),
-        m_tableName(tableName),
-        m_active(false)
+        m_tableName(tableName)
     {
         const std::string createSql = "CREATE TEMP TABLE IF NOT EXISTS " + m_tableName + " " + schema;
         SQLite::Statement createStmt(m_db, createSql.c_str());
         createStmt.exec();
-        m_active = true;
     }
 
     ~TempTableGuard()
     {
-        if (!m_active)
-        {
-            return;
-        }
         try
         {
             const std::string dropSql = "DROP TABLE IF EXISTS " + m_tableName;
@@ -54,7 +48,6 @@ public:
 private:
     SQLite::Database& m_db;
     std::string m_tableName;
-    bool m_active;
 };
 }
 
