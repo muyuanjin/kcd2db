@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <atomic>
 #include <chrono>
+#include <bit>
 #include <cstdio>
 #include <mutex>
 #include <optional>
@@ -175,7 +176,8 @@ void start()
         {
             DWORD tempOldProtect;
             VirtualProtect(&vTable[COMPLETE_INIT_INDEX], sizeof(void*),PAGE_EXECUTE_READWRITE, &tempOldProtect);
-            OriginalCompleteInit = static_cast<CompleteInitFunc>(vTable[COMPLETE_INIT_INDEX]);
+            static_assert(sizeof(CompleteInitFunc) == sizeof(void*), "Function pointer size mismatch");
+            OriginalCompleteInit = std::bit_cast<CompleteInitFunc>(vTable[COMPLETE_INIT_INDEX]);
         }
         while (InterlockedCompareExchangePointer(
             &vTable[COMPLETE_INIT_INDEX],
