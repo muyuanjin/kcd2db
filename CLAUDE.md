@@ -29,7 +29,12 @@ cmake --build build --config Debug
 
 ### 核心组件
 
-#### 1. 游戏引擎接口层 (`src/kcd2/`)
+#### 0. 引擎 SDK (`external/cryengine`)
+- `external/cryengine/include/cryengine` 仅包含从 [ValtoGameEngines/CryEngine](https://github.com/ValtoGameEngines/CryEngine) 抽取的最小头文件, 用于声明 `gEnv`、`IGame`、`IConsole` 等类型。
+- 该目录视为第三方依赖, 只提供编译期符号; 不可在功能开发或代码审查中直接修改, 也无需对其中的告警/Clang-Tidy 结果负责。
+- 更新流程请参考 `external/cryengine/README.md`, 在同步上游版本时应标注来源 commit 并保持零业务改动。
+
+#### 1. 游戏引擎接口层 (`external/cryengine/include/cryengine/`)
 包含反向工程的游戏引擎接口定义:
 - **`env.h`**: 定义 `SSystemGlobalEnvironment` 结构体,这是游戏引擎的全局环境变量,包含对各个子系统的指针 (pConsole, pScriptSystem, pGame 等)
 - **`IScriptSystem.h`**: Lua 脚本系统接口,定义了 `CScriptableBase`、`IFunctionHandler` 等用于注册 C++ 函数到 Lua 的接口

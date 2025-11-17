@@ -3,6 +3,12 @@
 ## 项目结构与模块组织
 仓库产出 `kcd2db.asi` 注入模块，顶层 `CMakeLists.txt` 管理依赖。`src/kcd2db.cpp` 负责查找 `gEnv` 并重定向 `IGame::CompleteInit`，`src/db` 提供 LuaDB 与 SQLiteCpp 的桥接逻辑，`src/log` 统一日志宏，`src/lua` 保存对游戏 Lua 可见的 API 包装。逆向得到的偏移、协议或说明位于 `openspec/`，而 `tests/` 下按功能划分（`hooks`、`luadb`、`log`、`stubs`）方便模拟游戏上下文。构建产物写入 `build/` 或 `build-coverage/`，请避免将生成文件提交版本库。
 
+## CryEngine SDK 镜像
+`external/cryengine/include/cryengine` 存放从 [ValtoGameEngines/CryEngine](https://github.com/ValtoGameEngines/CryEngine) 复制的最小头文件，仅用于提供引擎类型声明，帮助编译通过：
+- 视为第三方依赖，禁止在业务功能或代码审查中修改、引用或报错；任何 Clang-Tidy/bug 检查工具都必须排除该目录。
+- 如需更新，请参考 `external/cryengine/README.md`，统一同步上游偏移后再提交，禁止夹带业务逻辑。
+- 需要对照引擎实现时，可参考该目录代码，但评审内容应聚焦 `src/` 及测试目录。
+
 ## 构建、测试与开发命令
 统一在 WSL 中使用 `winexec` 调用 Windows 工具以保持一致环境：
 - `winexec cmake -B build -G "Visual Studio 17 2022" -DSQLITECPP_RUN_CPPLINT=OFF`：配置 MSVC Release 方案。
@@ -12,7 +18,7 @@
 - `winexec cmake -B build-coverage -DENABLE_COVERAGE=ON`（如需统计覆盖率）。
 
 ## 编码风格与命名约定
-使用 C++20、MSVC，始终开启 `/utf-8`。保持 4 空格缩进、左花括号换行，头文件使用 `#pragma once`。类型与类名用 PascalCase，函数与方法用 CamelCase，局部变量和静态助手使用 snake_case；日志标签遵循 `LogInfo/LogWarn/LogError` API。优先采用 RAII（`std::unique_ptr`, `std::optional`, `std::atomic`）和 `std::string_view` 以避免不必要复制；任何重复模式应提炼为 `src/db` 或 `src/kcd2` 下的独立助手。
+使用 C++20、MSVC，始终开启 `/utf-8`。保持 4 空格缩进、左花括号换行，头文件使用 `#pragma once`。类型与类名用 PascalCase，函数与方法用 CamelCase，局部变量和静态助手使用 snake_case；日志标签遵循 `LogInfo/LogWarn/LogError` API。优先采用 RAII（`std::unique_ptr`, `std::optional`, `std::atomic`）和 `std::string_view` 以避免不必要复制；任何重复模式应提炼为 `src/db` 或 `external/cryengine` 下的独立助手。
 
 ## 测试指南
 单元或集成脚本放在 `tests/` 中与模块同名子目录，Lua 场景放入 `tests/luadb`，钩子/虚拟环境桩件进入 `tests/hooks` 与 `tests/stubs`。新增行为需同时提供成功与失败路径断言，并在提交前执行 `winexec ctest --output-on-failure`，目标是覆盖新逻辑的主要分支（建议 ≥80% 行覆盖）。若测试依赖游戏 API，请使用 stub 或日志快照 (`tests/log`) 以保持可重复。

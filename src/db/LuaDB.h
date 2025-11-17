@@ -2,8 +2,8 @@
 #pragma once
 #include <functional>
 
-#include "../kcd2/IScriptSystem.h"
-#include "../kcd2/IGameFramework.h"
+#include <cryengine/IScriptSystem.h>
+#include <cryengine/IGameFramework.h>
 #include <unordered_map>
 #include <mutex>
 #include <optional>

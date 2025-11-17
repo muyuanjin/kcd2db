@@ -2,8 +2,8 @@
 
 #include <chrono>
 
-#include "../kcd2/env.h"
-#include "../kcd2/IConsole.h"
+#include <cryengine/env.h>
+#include <cryengine/IConsole.h>
 
 #include <fstream>
 #include <iomanip>
