@@ -37,6 +37,19 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(SQLiteCpp)
 
+set(CRYENGINE_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/cryengine/include")
+file(GLOB_RECURSE CRYENGINE_SDK_HEADERS
+        "${CRYENGINE_SDK_INCLUDE_DIR}/cryengine/*.h"
+)
+add_library(cryengine_sdk INTERFACE)
+target_include_directories(cryengine_sdk SYSTEM INTERFACE "${CRYENGINE_SDK_INCLUDE_DIR}")
+if (CRYENGINE_SDK_HEADERS)
+    target_sources(cryengine_sdk INTERFACE FILE_SET HEADERS
+            BASE_DIRS "${CRYENGINE_SDK_INCLUDE_DIR}"
+            FILES ${CRYENGINE_SDK_HEADERS}
+    )
+endif ()
+
 file(GLOB_RECURSE KCD2DB_SOURCES
         "src/*.cpp"
         "src/*.h"
@@ -45,6 +58,6 @@ add_library(kcd2db SHARED ${KCD2DB_SOURCES})
 # Define LM_EXPORT to use libmem as a static library
 target_compile_definitions(kcd2db PRIVATE LM_EXPORT)
 
-target_link_libraries(kcd2db PRIVATE libmem::libmem ntdll SQLiteCpp SQLite::SQLite3)
+target_link_libraries(kcd2db PRIVATE cryengine_sdk libmem::libmem ntdll SQLiteCpp SQLite::SQLite3)
 
 set_target_properties(kcd2db PROPERTIES SUFFIX ".asi" PREFIX "")

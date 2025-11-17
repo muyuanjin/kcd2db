@@ -1,28 +1,37 @@
 #include <windows.h>
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <mutex>
 #include <optional>
+#include <string>
+#include <string_view>
+#include <thread>
 #include <libmem/libmem.h>
 
 #define KCD2_ENV_IMPORT
 #include "db/LuaDB.h"
-#include "kcd2/env.h"
-#include "kcd2/IGame.h"
+#include <cryengine/env.h>
+#include <cryengine/IGame.h>
 #include "log/log.h"
 
-// 将字节序列转换为 libmem 兼容的模式
-std::string bytes_to_pattern(const unsigned char* bytes, size_t size)
+namespace
 {
-    char hex_map[] = "0123456789ABCDEF";
+constexpr std::string_view kHexDigits = "0123456789ABCDEF";
+}
+
+// 将字节序列转换为 libmem 兼容的模式
+std::string bytes_to_pattern(const unsigned char* bytes, const size_t size)
+{
     std::string pattern;
     pattern.reserve(size * 3);
     for (size_t i = 0; i < size; ++i)
     {
-        pattern += hex_map[(bytes[i] & 0xF0) >> 4];
-        pattern += hex_map[bytes[i] & 0x0F];
-        if (i < size - 1)
+        pattern += kHexDigits[(bytes[i] & 0xF0) >> 4];
+        pattern += kHexDigits[bytes[i] & 0x0F];
+        if (i + 1 < size)
         {
-            pattern += " ";
+            pattern += ' ';
         }
     }
     return pattern;
@@ -55,7 +64,7 @@ std::optional<uintptr_t> find_env_addr()
     uintptr_t scan_start = module.base;
     while (scan_start < module.base + module.size)
     {
-        uintptr_t potential_lea = LM_SigScan("48 8D 15 ? ? ? ?", scan_start, module.size - (scan_start - module.base));
+        const uintptr_t potential_lea = LM_SigScan("48 8D 15 ? ? ? ?", scan_start, module.size - (scan_start - module.base));
         if (!potential_lea)
         {
             LogError("Could not find any cross-references (LEA) to the anchor string.");
@@ -63,8 +72,7 @@ std::optional<uintptr_t> find_env_addr()
         }
         int32_t rip_offset;
         LM_ReadMemory(potential_lea + 3, reinterpret_cast<lm_byte_t*>(&rip_offset), sizeof(rip_offset));
-        uintptr_t referenced_addr = potential_lea + 7 + rip_offset;
-        if (referenced_addr == string_addr)
+        if (const uintptr_t referenced_addr = potential_lea + 7 + rip_offset; referenced_addr == string_addr)
         {
             lea_instruction_addr = potential_lea;
             LogInfo("Found LEA instruction referencing the string at: 0x%llX", lea_instruction_addr);
@@ -131,10 +139,11 @@ static std::atomic<LuaDB*> gLuaDB{nullptr};
 bool __thiscall Hooked_CompleteInit(IGame* pThis)
 {
     LogDebug("Hooked_CompleteInit");
-    LuaDB* luaDB = nullptr;
-    while ((luaDB = gLuaDB.load(std::memory_order_acquire)) == nullptr)
+    LuaDB* luaDB = gLuaDB.load(std::memory_order_acquire);
+    while (luaDB == nullptr)
     {
         std::this_thread::yield();
+        luaDB = gLuaDB.load(std::memory_order_acquire);
     }
     luaDB->RegisterLuaAPI();
     LogInfo("Hooked_CompleteInit completed");
@@ -220,17 +229,18 @@ DWORD WINAPI main_thread(LPVOID)
 }
 
 
-BOOL APIENTRY DllMain(const HMODULE hModule, const DWORD reason, LPVOID lpReserved)
+BOOL APIENTRY DllMain(const HMODULE hModule, const DWORD reason, LPVOID /*lpReserved*/)
 {
     if (reason == DLL_PROCESS_ATTACH)
     {
         DisableThreadLibraryCalls(hModule);
-        CreateThread(nullptr, 0, [](LPVOID param) -> DWORD
+        CreateThread(nullptr, 0, [](LPVOID /*unused*/) -> DWORD
         {
             Log_init();
             LogDebug("DLL attached");
             // 创建主工作线程
-            if (const HANDLE hThread = CreateThread(nullptr, 0, main_thread, nullptr, 0, nullptr))
+            // ReSharper disable once CppLocalVariableMayBeConst
+            if (HANDLE hThread = CreateThread(nullptr, 0, main_thread, nullptr, 0, nullptr))
             {
                 CloseHandle(hThread);
             }
@@ -244,14 +254,14 @@ BOOL APIENTRY DllMain(const HMODULE hModule, const DWORD reason, LPVOID lpReserv
     else if (reason == DLL_PROCESS_DETACH)
     {
         Log_close();
-        if (gEnv && gEnv->pGame)
+        if (gEnv->pGame)
         {
-            void** vTable = *reinterpret_cast<void***>(gEnv->pGame);
+            CompleteInitFunc* vTable = *reinterpret_cast<CompleteInitFunc**>(gEnv->pGame);
             // 恢复原函数
             DWORD oldProtect;
-            VirtualProtect(&vTable[COMPLETE_INIT_INDEX], sizeof(void*), PAGE_READWRITE, &oldProtect);
+            VirtualProtect(&vTable[COMPLETE_INIT_INDEX], sizeof(CompleteInitFunc), PAGE_READWRITE, &oldProtect);
             vTable[COMPLETE_INIT_INDEX] = OriginalCompleteInit;
-            VirtualProtect(&vTable[COMPLETE_INIT_INDEX], sizeof(void*), oldProtect, nullptr);
+            VirtualProtect(&vTable[COMPLETE_INIT_INDEX], sizeof(CompleteInitFunc), oldProtect, nullptr);
         }
     }
     return TRUE;

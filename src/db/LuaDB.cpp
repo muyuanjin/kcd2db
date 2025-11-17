@@ -3,8 +3,8 @@
 //
 
 #include "LuaDB.h"
-#include "../kcd2/IConsole.h"
-#include "../kcd2/IGame.h"
+#include <cryengine/IConsole.h>
+#include <cryengine/IGame.h>
 #include <ranges>
 #include <sstream>
 #include <unordered_set>
