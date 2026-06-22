@@ -558,7 +558,8 @@ void RestoreCompleteInitHook()
     }
 
     *slot = std::bit_cast<void*>(OriginalCompleteInit);
-    if (!VirtualProtect(slot, sizeof(void*), oldProtect, nullptr))
+    DWORD restoredOldProtect = 0;
+    if (!VirtualProtect(slot, sizeof(void*), oldProtect, &restoredOldProtect))
     {
         LogWarn("CompleteInit hook restore succeeded, but restoring page protection failed with %lu.", GetLastError());
     }
@@ -601,7 +602,8 @@ void start()
                 LogError("Failed to keep CompleteInit vtable slot writable at 0x%llX: %lu.",
                          reinterpret_cast<uintptr_t>(completeInitSlot),
                          GetLastError());
-                if (!VirtualProtect(completeInitSlot, sizeof(void*), initialOldProtect, nullptr))
+                DWORD restoredOldProtect = 0;
+                if (!VirtualProtect(completeInitSlot, sizeof(void*), initialOldProtect, &restoredOldProtect))
                 {
                     LogWarn("Failed to restore CompleteInit vtable slot protection after hook install abort: %lu.",
                             GetLastError());
@@ -616,7 +618,8 @@ void start()
             reinterpret_cast<PVOID>(&Hooked_CompleteInit),
             reinterpret_cast<PVOID>(OriginalCompleteInit)) != OriginalCompleteInit);
 
-        if (!VirtualProtect(completeInitSlot, sizeof(void*), initialOldProtect, nullptr))
+        DWORD restoredOldProtect = 0;
+        if (!VirtualProtect(completeInitSlot, sizeof(void*), initialOldProtect, &restoredOldProtect))
         {
             LogWarn("CompleteInit hook installed, but restoring page protection failed with %lu.", GetLastError());
         }
