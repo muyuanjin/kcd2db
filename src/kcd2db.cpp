@@ -147,6 +147,25 @@ std::string to_lower_ascii(std::string_view value)
     return result;
 }
 
+bool equals_ignore_case_ascii(std::string_view lhs, std::string_view rhs)
+{
+    if (lhs.size() != rhs.size())
+    {
+        return false;
+    }
+
+    for (size_t i = 0; i < lhs.size(); ++i)
+    {
+        const auto left = static_cast<unsigned char>(lhs[i]);
+        const auto right = static_cast<unsigned char>(rhs[i]);
+        if (std::tolower(left) != std::tolower(right))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool contains_diagnostic_token(const lm_module_t& module)
 {
     const std::string text = to_lower_ascii(std::string(module.name) + " " + module.path);
@@ -179,6 +198,48 @@ struct ModuleDiagnostics
     std::vector<std::string> fallbackNames;
     bool enumSucceeded = false;
 };
+
+struct ModuleNameSearch
+{
+    std::string_view expectedName;
+    lm_module_t* result = nullptr;
+    bool found = false;
+};
+
+lm_bool_t LM_CALL find_module_by_name_case_insensitive(lm_module_t* module, lm_void_t* arg)
+{
+    auto* search = static_cast<ModuleNameSearch*>(arg);
+    if (!module || search->found)
+    {
+        return LM_TRUE;
+    }
+
+    if (equals_ignore_case_ascii(module->name, search->expectedName))
+    {
+        *search->result = *module;
+        search->found = true;
+    }
+    return LM_TRUE;
+}
+
+bool find_target_module(lm_module_t& module)
+{
+    if (LM_FindModule(kClientDll, &module))
+    {
+        return true;
+    }
+
+    ModuleNameSearch search{
+        .expectedName = kClientDll,
+        .result = &module,
+        .found = false,
+    };
+    if (LM_EnumModules(find_module_by_name_case_insensitive, &search) != LM_TRUE)
+    {
+        return false;
+    }
+    return search.found;
+}
 
 lm_bool_t LM_CALL collect_module_diagnostics(lm_module_t* module, lm_void_t* arg)
 {
@@ -296,7 +357,7 @@ std::optional<uintptr_t> find_env_addr()
     const auto waitStart = steady_clock::now();
     auto nextDiagnosticTime = waitStart + seconds(10);
     bool wroteInitialWaitLog = false;
-    while (!LM_FindModule(kClientDll, &module))
+    while (!find_target_module(module))
     {
         const auto now = steady_clock::now();
         if (!wroteInitialWaitLog)
