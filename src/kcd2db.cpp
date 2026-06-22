@@ -436,8 +436,13 @@ std::optional<uintptr_t> find_env_addr()
             log_scan_module_error("Could not find any cross-references (LEA) to the anchor string.", module);
             return std::nullopt;
         }
-        int32_t rip_offset;
-        LM_ReadMemory(potential_lea + 3, reinterpret_cast<lm_byte_t*>(&rip_offset), sizeof(rip_offset));
+        int32_t rip_offset = 0;
+        if (!LM_ReadMemory(potential_lea + 3, reinterpret_cast<lm_byte_t*>(&rip_offset), sizeof(rip_offset)))
+        {
+            LogWarn("Failed to read RIP offset from potential LEA at 0x%llX; continuing scan.", potential_lea);
+            scan_start = potential_lea + 1;
+            continue;
+        }
         if (const uintptr_t referenced_addr = potential_lea + 7 + rip_offset; referenced_addr == string_addr)
         {
             lea_instruction_addr = potential_lea;
@@ -545,7 +550,7 @@ void RestoreCompleteInitHook()
         return;
     }
 
-    DWORD oldProtect;
+    DWORD oldProtect = 0;
     if (!VirtualProtect(slot, sizeof(void*), PAGE_EXECUTE_READWRITE, &oldProtect))
     {
         LogWarn("CompleteInit hook restore failed; VirtualProtect returned %lu.", GetLastError());
@@ -553,7 +558,10 @@ void RestoreCompleteInitHook()
     }
 
     *slot = std::bit_cast<void*>(OriginalCompleteInit);
-    VirtualProtect(slot, sizeof(void*), oldProtect, nullptr);
+    if (!VirtualProtect(slot, sizeof(void*), oldProtect, nullptr))
+    {
+        LogWarn("CompleteInit hook restore succeeded, but restoring page protection failed with %lu.", GetLastError());
+    }
     LogDebug("Restored CompleteInit hook.");
 }
 
@@ -576,21 +584,42 @@ void start()
         IGame* pGame = gEnv->pGame;
 
         void** vTable = *reinterpret_cast<void***>(pGame);
-        DWORD initialOldProtect;
-        VirtualProtect(&vTable[COMPLETE_INIT_INDEX], sizeof(void*),PAGE_EXECUTE_READWRITE, &initialOldProtect);
+        void** completeInitSlot = &vTable[COMPLETE_INIT_INDEX];
+        DWORD initialOldProtect = 0;
+        if (!VirtualProtect(completeInitSlot, sizeof(void*), PAGE_EXECUTE_READWRITE, &initialOldProtect))
+        {
+            LogError("Failed to make CompleteInit vtable slot writable at 0x%llX: %lu.",
+                     reinterpret_cast<uintptr_t>(completeInitSlot),
+                     GetLastError());
+            return;
+        }
         do
         {
-            DWORD tempOldProtect;
-            VirtualProtect(&vTable[COMPLETE_INIT_INDEX], sizeof(void*),PAGE_EXECUTE_READWRITE, &tempOldProtect);
+            DWORD tempOldProtect = 0;
+            if (!VirtualProtect(completeInitSlot, sizeof(void*), PAGE_EXECUTE_READWRITE, &tempOldProtect))
+            {
+                LogError("Failed to keep CompleteInit vtable slot writable at 0x%llX: %lu.",
+                         reinterpret_cast<uintptr_t>(completeInitSlot),
+                         GetLastError());
+                if (!VirtualProtect(completeInitSlot, sizeof(void*), initialOldProtect, nullptr))
+                {
+                    LogWarn("Failed to restore CompleteInit vtable slot protection after hook install abort: %lu.",
+                            GetLastError());
+                }
+                return;
+            }
             static_assert(sizeof(CompleteInitFunc) == sizeof(void*), "Function pointer size mismatch");
-            OriginalCompleteInit = std::bit_cast<CompleteInitFunc>(vTable[COMPLETE_INIT_INDEX]);
+            OriginalCompleteInit = std::bit_cast<CompleteInitFunc>(*completeInitSlot);
         }
         while (InterlockedCompareExchangePointer(
-            &vTable[COMPLETE_INIT_INDEX],
+            completeInitSlot,
             reinterpret_cast<PVOID>(&Hooked_CompleteInit),
             reinterpret_cast<PVOID>(OriginalCompleteInit)) != OriginalCompleteInit);
 
-        VirtualProtect(&vTable[COMPLETE_INIT_INDEX], sizeof(void*), initialOldProtect, nullptr);
+        if (!VirtualProtect(completeInitSlot, sizeof(void*), initialOldProtect, nullptr))
+        {
+            LogWarn("CompleteInit hook installed, but restoring page protection failed with %lu.", GetLastError());
+        }
 
         LogDebug("Hooked CompleteInit function");
         LogInfo("Using LuaDB database at: %s", make_expected_db_path().c_str());
@@ -643,7 +672,7 @@ BOOL APIENTRY DllMain(const HMODULE hModule, const DWORD reason, LPVOID lpReserv
     if (reason == DLL_PROCESS_ATTACH)
     {
         DisableThreadLibraryCalls(hModule);
-        CreateThread(nullptr, 0, [](LPVOID moduleHandle) -> DWORD
+        HANDLE initThread = CreateThread(nullptr, 0, [](LPVOID moduleHandle) -> DWORD
         {
             Log_init();
             log_startup_diagnostics(static_cast<HMODULE>(moduleHandle));
@@ -660,6 +689,14 @@ BOOL APIENTRY DllMain(const HMODULE hModule, const DWORD reason, LPVOID lpReserv
             }
             return 0;
         }, hModule, 0, nullptr);
+        if (initThread)
+        {
+            CloseHandle(initThread);
+        }
+        else
+        {
+            LogError("Failed to create initialization thread: %lu", GetLastError());
+        }
     }
     else if (reason == DLL_PROCESS_DETACH)
     {
