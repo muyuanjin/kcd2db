@@ -322,10 +322,10 @@ void LuaDB::SyncCacheWithDatabaseLocked()
 
     m_globalCache.clear();
     LoadCache(m_globalCache, "");
-    if (!m_currentSaveGame.empty())
+    if (!m_saveCacheFileName.empty())
     {
         m_saveCache.clear();
-        LoadCache(m_saveCache, m_currentSaveGame);
+        LoadCache(m_saveCache, m_saveCacheFileName);
     }
 }
 
@@ -402,9 +402,9 @@ void LuaDB::OnLoadGame(ILoadGame* pLoadGame)
 {
     const std::string loadFileName = pLoadGame->GetFileName();
     LogInfo("Load Game : %s", loadFileName.c_str());
-    // 更新当前存档名
+    // 记录当前本地缓存对应的存档文件名。
     std::lock_guard lock(m_mutex);
-    m_currentSaveGame = loadFileName;
+    m_saveCacheFileName = loadFileName;
     SyncCacheWithDatabaseLocked();
 }
 
@@ -412,21 +412,45 @@ void LuaDB::OnSaveGame(ISaveGame* pSaveGame)
 {
     const std::string newSave = pSaveGame->GetFileName();
     LogInfo("Save Game : %s", newSave.c_str());
-    // 将 m_saveCache 写入数据库
+    // 将当前缓存作为完整快照写入，避免同名存档复用时残留旧键。
     std::lock_guard lock(m_mutex);
-    if (!m_saveCache.empty())
+    try
     {
-        if (const int successCount = BatchOperation(*m_db, m_saveCache, newSave);
-            successCount == m_saveCache.size())
+        ExecuteTransaction([this, &newSave](SQLite::Database& db)
         {
-            LogInfo("Data saved: %zu entries", m_saveCache.size());
-        }
-        else
-        {
-            LogError("Save data error: %d/%zu entries saved", successCount, m_saveCache.size());
-        }
+            SQLite::Statement deleteStmt(db, "DELETE FROM Store WHERE savefile = ?");
+            deleteStmt.bind(1, newSave);
+            deleteStmt.exec();
+
+            if (m_saveCache.empty())
+            {
+                return;
+            }
+
+            SQLite::Statement stmt(db,
+                                   "INSERT INTO Store (key, savefile, type, value, updated_at) "
+                                   "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)");
+            for (const auto& [k, v] : m_saveCache)
+            {
+                stmt.bind(1, k);
+                stmt.bind(2, newSave);
+                stmt.bind(3, v.anyType());
+                stmt.bind(4, serializeValue(v));
+                stmt.exec();
+                stmt.reset();
+            }
+        });
+        LogInfo("Data saved: %zu entries", m_saveCache.size());
     }
-    m_currentSaveGame = newSave;
+    catch (const std::exception& e)
+    {
+        LogError("Save data failed: %s", e.what());
+    }
+    catch (...)
+    {
+        LogError("Save data failed: Unknown error");
+    }
+    m_saveCacheFileName = newSave;
 }
 
 void LuaDB::OnPostUpdate(float /*fDeltaTime*/)
@@ -552,7 +576,7 @@ int LuaDB::Dump(IFunctionHandler* pH)
 
     dumpCache(m_globalCache, "[Global Data]");
     std::ostringstream oss;
-    oss << "[Save Data For : " << (m_currentSaveGame.empty() ? "No active save file" : m_currentSaveGame) << "]";
+    oss << "[Save Data For : " << (m_saveCacheFileName.empty() ? "No save file bound to cache" : m_saveCacheFileName) << "]";
     dumpCache(m_saveCache, oss.str());
     return pH->EndFunction();
 }

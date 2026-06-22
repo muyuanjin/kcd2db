@@ -143,7 +143,9 @@ private:
     void SyncCacheWithDatabaseLocked();
 
     std::unique_ptr<SQLite::Database> m_db;
-    std::string m_currentSaveGame;
+    // The save file name used as the database key for m_saveCache.
+    // It may be set by loading a save or by saving a new one.
+    std::string m_saveCacheFileName;
     mutable std::mutex m_mutex;
     Cache m_saveCache;
     Cache m_globalCache;
