@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.30)
 project(kcd2db C CXX)
 
+set(KCD2DB_VERSION "dev" CACHE STRING "kcd2db version string embedded in debug logs")
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -56,7 +58,11 @@ file(GLOB_RECURSE KCD2DB_SOURCES
 )
 add_library(kcd2db SHARED ${KCD2DB_SOURCES})
 # Define LM_EXPORT to use libmem as a static library
-target_compile_definitions(kcd2db PRIVATE LM_EXPORT)
+target_compile_definitions(kcd2db PRIVATE
+        LM_EXPORT
+        KCD2DB_VERSION="${KCD2DB_VERSION}"
+        KCD2DB_BUILD_CONFIG="$<CONFIG>"
+)
 
 target_link_libraries(kcd2db PRIVATE cryengine_sdk libmem::libmem ntdll SQLiteCpp SQLite::SQLite3)
 

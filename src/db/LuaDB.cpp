@@ -236,12 +236,18 @@ LuaDB::LuaDB() :
 bool LuaDB::isRegistered() const
 {
     std::lock_guard lock(m_mutex);
-    return m_pSS != nullptr;
+    return m_registered;
 }
 
 void LuaDB::RegisterLuaAPI()
 {
     std::lock_guard lock(m_mutex);
+    if (m_registered)
+    {
+        LogDebug("LuaDB is already registered.");
+        return;
+    }
+
     CScriptableBase::Init(gEnv->pScriptSystem, gEnv->pSystem);
     SetGlobalName("LuaDB");
 #undef SCRIPT_REG_CLASSNAME
@@ -279,12 +285,18 @@ void LuaDB::RegisterLuaAPI()
     LogDebug("DB lua API loaded");
     gEnv->pGame->GetIGameFramework()->RegisterListener(this, "LuaDB", FRAMEWORKLISTENERPRIORITY_DEFAULT);
     LogDebug("LuaDB registered as game framework listener");
+    m_registered = true;
     LogInfo("LuaDB loading completed.");
 }
 
 void LuaDB::SyncCacheWithDatabase()
 {
     std::lock_guard lock(m_mutex);
+    SyncCacheWithDatabaseLocked();
+}
+
+void LuaDB::SyncCacheWithDatabaseLocked()
+{
     auto LoadCache = [&](auto& cache, const std::string& savefile)
     {
         static constexpr auto SELECT_SQL = R"(
@@ -391,8 +403,9 @@ void LuaDB::OnLoadGame(ILoadGame* pLoadGame)
     const std::string loadFileName = pLoadGame->GetFileName();
     LogInfo("Load Game : %s", loadFileName.c_str());
     // 更新当前存档名
+    std::lock_guard lock(m_mutex);
     m_currentSaveGame = loadFileName;
-    SyncCacheWithDatabase();
+    SyncCacheWithDatabaseLocked();
 }
 
 void LuaDB::OnSaveGame(ISaveGame* pSaveGame)

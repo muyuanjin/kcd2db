@@ -140,6 +140,7 @@ private:
 
     void ExecuteTransaction(const std::function<void(SQLite::Database&)>& task) const;
     void SyncCacheWithDatabase();
+    void SyncCacheWithDatabaseLocked();
 
     std::unique_ptr<SQLite::Database> m_db;
     std::string m_currentSaveGame;
@@ -151,4 +152,5 @@ private:
     std::chrono::steady_clock::time_point m_lastSaveTime;
 
     bool m_globalDirty = false;
+    bool m_registered = false;
 };

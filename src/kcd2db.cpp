@@ -21,12 +21,46 @@
 #include <cryengine/IGame.h>
 #include "log/log.h"
 
+#ifndef KCD2DB_VERSION
+#define KCD2DB_VERSION "dev"
+#endif
+
+#ifndef KCD2DB_BUILD_CONFIG
+#define KCD2DB_BUILD_CONFIG "unknown"
+#endif
+
 std::string bytes_to_pattern(const unsigned char* bytes, size_t size);
 
 namespace
 {
 constexpr std::string_view kHexDigits = "0123456789ABCDEF";
 constexpr auto kClientDll = "WHGame.DLL";
+
+std::string get_compiler_version()
+{
+#if defined(_MSC_FULL_VER)
+    return "MSVC " + std::to_string(_MSC_FULL_VER);
+#elif defined(__clang_version__)
+    return "Clang " __clang_version__;
+#elif defined(__GNUC__)
+    return "GCC " + std::to_string(__GNUC__) + "." + std::to_string(__GNUC_MINOR__) + "." + std::to_string(__GNUC_PATCHLEVEL__);
+#else
+    return "unknown";
+#endif
+}
+
+constexpr const char* get_target_arch()
+{
+#if defined(_M_X64) || defined(__x86_64__)
+    return "x64";
+#elif defined(_M_IX86) || defined(__i386__)
+    return "x86";
+#elif defined(_M_ARM64) || defined(__aarch64__)
+    return "arm64";
+#else
+    return "unknown";
+#endif
+}
 
 std::string wide_to_utf8(const wchar_t* value)
 {
@@ -198,6 +232,11 @@ void log_module_diagnostics()
 
 void log_startup_diagnostics(HMODULE selfModule)
 {
+    LogDebug("kcd2db version: %s, config: %s, compiler: %s, arch: %s",
+             KCD2DB_VERSION,
+             KCD2DB_BUILD_CONFIG,
+             get_compiler_version().c_str(),
+             get_target_arch());
     LogDebug("kcd2db.asi path: %s", get_module_path(selfModule).c_str());
     LogDebug("Process exe path: %s", get_module_path(nullptr).c_str());
     LogDebug("Current working directory: %s", get_current_directory_path().c_str());
@@ -369,14 +408,54 @@ bool __thiscall Hooked_CompleteInit(IGame* pThis)
 {
     LogDebug("Hooked_CompleteInit");
     LuaDB* luaDB = gLuaDB.load(std::memory_order_acquire);
+    const auto waitStart = std::chrono::steady_clock::now();
+    auto nextWaitLog = waitStart + std::chrono::seconds(1);
     while (luaDB == nullptr)
     {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= nextWaitLog)
+        {
+            const auto waitedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - waitStart).count();
+            LogWarn("Hooked_CompleteInit is waiting for LuaDB initialization (%lld ms).", waitedMs);
+            nextWaitLog = now + std::chrono::seconds(5);
+        }
         std::this_thread::yield();
         luaDB = gLuaDB.load(std::memory_order_acquire);
     }
+    // Game Lua state must be touched from the CompleteInit thread.
     luaDB->RegisterLuaAPI();
     LogDebug("Hooked_CompleteInit completed");
     return OriginalCompleteInit(pThis);
+}
+
+void RestoreCompleteInitHook()
+{
+    if (gEnv->pGame == nullptr || OriginalCompleteInit == nullptr)
+    {
+        LogDebug("CompleteInit hook restore skipped; game or original function is unavailable.");
+        return;
+    }
+
+    void** vTable = *reinterpret_cast<void***>(gEnv->pGame);
+    void** slot = &vTable[COMPLETE_INIT_INDEX];
+    const auto hookPtr = reinterpret_cast<void*>(&Hooked_CompleteInit);
+
+    if (*slot != hookPtr)
+    {
+        LogWarn("CompleteInit hook restore skipped; vtable slot no longer points to this module.");
+        return;
+    }
+
+    DWORD oldProtect;
+    if (!VirtualProtect(slot, sizeof(void*), PAGE_EXECUTE_READWRITE, &oldProtect))
+    {
+        LogWarn("CompleteInit hook restore failed; VirtualProtect returned %lu.", GetLastError());
+        return;
+    }
+
+    *slot = std::bit_cast<void*>(OriginalCompleteInit);
+    VirtualProtect(slot, sizeof(void*), oldProtect, nullptr);
+    LogDebug("Restored CompleteInit hook.");
 }
 
 void start()
@@ -429,8 +508,8 @@ void start()
 
         if (!luaDB->isRegistered())
         {
-            LogWarn("LuaDB is not registered, will register now");
-            luaDB->RegisterLuaAPI();
+            // Do not register from this worker thread; it can race the game's Lua state.
+            LogError("LuaDB was not registered by the CompleteInit hook; not registering from worker thread.");
         }
     }
     else
@@ -460,7 +539,7 @@ DWORD WINAPI main_thread(LPVOID)
 }
 
 
-BOOL APIENTRY DllMain(const HMODULE hModule, const DWORD reason, LPVOID /*lpReserved*/)
+BOOL APIENTRY DllMain(const HMODULE hModule, const DWORD reason, LPVOID lpReserved)
 {
     if (reason == DLL_PROCESS_ATTACH)
     {
@@ -485,16 +564,13 @@ BOOL APIENTRY DllMain(const HMODULE hModule, const DWORD reason, LPVOID /*lpRese
     }
     else if (reason == DLL_PROCESS_DETACH)
     {
-        Log_close();
-        if (gEnv->pGame)
+        // Full hot unload is unsupported. On FreeLibrary, only restore our vtable slot
+        // so it does not point at unloaded code; avoid game-owned objects during process teardown.
+        if (lpReserved == nullptr)
         {
-            CompleteInitFunc* vTable = *reinterpret_cast<CompleteInitFunc**>(gEnv->pGame);
-            // 恢复原函数
-            DWORD oldProtect;
-            VirtualProtect(&vTable[COMPLETE_INIT_INDEX], sizeof(CompleteInitFunc), PAGE_READWRITE, &oldProtect);
-            vTable[COMPLETE_INIT_INDEX] = OriginalCompleteInit;
-            VirtualProtect(&vTable[COMPLETE_INIT_INDEX], sizeof(CompleteInitFunc), oldProtect, nullptr);
+            RestoreCompleteInitHook();
         }
+        Log_close();
     }
     return TRUE;
 }

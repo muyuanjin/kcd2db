@@ -4,7 +4,7 @@
 仓库产出 `kcd2db.asi` 注入模块，顶层 `CMakeLists.txt` 管理依赖。`src/kcd2db.cpp` 负责查找 `gEnv` 并重定向 `IGame::CompleteInit`，`src/db` 提供 LuaDB 与 SQLiteCpp 的桥接逻辑，`src/log` 统一日志函数，`src/lua` 保存对游戏 Lua 可见的 API 包装。`external/cryengine` 是最小 CryEngine 头文件镜像，仅提供编译期类型声明。当前仓库没有提交 `tests/`、`docs/` 或 `openspec/` 目录；若新增，请同步更新本文档和 README。构建产物写入 `build/` 或 IDE 生成目录，请避免提交生成文件。
 
 ## 关键实现边界
-这是《天国拯救2》的 Windows x64 ASI 插件，CMake 会强制要求 Windows + MSVC。`src/kcd2db.cpp` 通过签名扫描定位 `gEnv`，修改 `IGame::CompleteInit` 虚表入口并注册 Lua API；任何改动都必须考虑游戏版本更新导致的指令上下文变化。`src/db/LuaDB.*` 维护 `m_saveCache` 与 `m_globalCache`：存档关联数据在 `OnSaveGame` 写入，全局数据由 `OnPostUpdate` 脏标记定时写入。`src/lua/db.h` 的 `DB` 包装层负责命名空间隔离与 JSON 编解码；底层 `LuaDB` 只直接处理 bool、float 和 string。
+这是《天国拯救2》的 Windows x64 ASI 插件，CMake 会强制要求 Windows + MSVC。`src/kcd2db.cpp` 通过签名扫描定位 `gEnv`，修改 `IGame::CompleteInit` 虚表入口并注册 Lua API；任何改动都必须考虑游戏版本更新导致的指令上下文变化。触碰游戏 Lua 或 framework 状态的操作必须保持在游戏初始化线程上执行，Lua API 注册路径以 `CompleteInit` hook 为准；`main_thread` 只负责等待模块、定位 `gEnv`、安装 hook 和构造 `LuaDB`。`src/db/LuaDB.*` 维护 `m_saveCache` 与 `m_globalCache`：存档关联数据在 `OnSaveGame` 写入，全局数据由 `OnPostUpdate` 脏标记定时写入。`src/lua/db.h` 的 `DB` 包装层负责命名空间隔离与 JSON 编解码；底层 `LuaDB` 只直接处理 bool、float 和 string。
 
 ## CryEngine SDK 镜像
 `external/cryengine/include/cryengine` 存放从 [ValtoGameEngines/CryEngine](https://github.com/ValtoGameEngines/CryEngine) 复制的最小头文件，仅用于提供引擎类型声明，帮助编译通过：
@@ -32,7 +32,7 @@
 按照历史记录（如 `Refactor: 使用 std::bit_cast 替代 static_cast 进行虚表函数指针转换`、`Fix #1 Lua crash in multithreaded execution`）保持简短祈使句式，首字母大写，必要时引用 issue 编号或模块前缀。单个提交聚焦一个主题并包含相关验证。PR 描述需概述动机、方案与验证步骤；若修改影响游戏内接口，附加 Lua 片段示例能加速评审。
 
 ## 安全与配置提示
-模块会修改游戏虚表与内存保护，请勿在未经验证的地址上尝试新钩子；偏移和签名扫描逻辑应集中在 `src/kcd2db.cpp` 或专用常量附近，便于热修复。提交前确认 `kcd2db.log` 与 `kcd2db.db` 仍使用相对游戏进程工作目录，同时避免将真实游戏资源或密钥推送到仓库。
+模块会修改游戏虚表与内存保护，请勿在未经验证的地址上尝试新钩子；偏移和签名扫描逻辑应集中在 `src/kcd2db.cpp` 或专用常量附近，便于热修复。当前设计不支持 `FreeLibrary` 热卸载，禁用模块需要移除或重命名 `.asi` 后重启游戏。提交前确认 `kcd2db.log` 与 `kcd2db.db` 仍使用相对游戏进程工作目录，同时避免将真实游戏资源或密钥推送到仓库。
 
 ## Agent 文档约定
 本仓库只维护 `AGENTS.md` 作为 agent 指南，不再单独维护 `CLAUDE.md` 或其他平台专用重复文件。新增或调整 agent 规则时，合并到本文档；长篇 API、安装和用户示例应放入 README，避免让 agent 指南膨胀成架构手册。
