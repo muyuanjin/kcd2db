@@ -189,7 +189,7 @@ LuaDB.Dump()
 - `cmake -B build -G "Visual Studio 17 2022" -DSQLITECPP_RUN_CPPCHECK=OFF -DSQLITECPP_RUN_CPPLINT=OFF`
 - `cmake --build build --config Release`
 
-When building from WSL for this shared Windows repository, run the same commands through `winexec`.
+When building from WSL, make sure `cmake` resolves to the Windows CMake/MSVC toolchain and use source/build directories on a Windows-accessible path.
 
 ## Debugging
 
@@ -396,7 +396,7 @@ LuaDB.Dump()
 - `cmake -B build -G "Visual Studio 17 2022" -DSQLITECPP_RUN_CPPCHECK=OFF -DSQLITECPP_RUN_CPPLINT=OFF`
 - `cmake --build build --config Release`
 
-在 WSL 的共享 Windows 仓库中构建时，请通过 `winexec` 运行相同命令。
+在 WSL 中构建时，请确保 `cmake` 解析到 Windows CMake/MSVC 工具链，并使用 Windows 可访问路径下的源码与构建目录。
 
 ## 调试
 

@@ -13,17 +13,17 @@
 - 需要对照引擎实现时，可参考该目录代码，但评审内容应聚焦 `src/`。
 
 ## 构建、测试与开发命令
-统一在 WSL 中使用 `winexec` 调用 Windows 工具以保持一致环境：
-- `winexec cmake -B build -G "Visual Studio 17 2022" -DSQLITECPP_RUN_CPPCHECK=OFF -DSQLITECPP_RUN_CPPLINT=OFF`：配置 MSVC Release 方案。
-- `winexec cmake --build build --config Release`：产出发布版 `kcd2db.asi`。
-- `winexec cmake --build build --config Debug`：生成含调试符号的 DLL，便于附加到游戏进程。
-- `winexec ctest --test-dir build --output-on-failure`：仅在重新引入 CTest 目标后运行；当前 `CMakeLists.txt` 未定义测试目标。
+在 WSL 中构建时，确保 `cmake` 解析到 Windows CMake/MSVC 工具链，且源码与构建目录位于 Windows 可访问路径。
+- `cmake -B build -G "Visual Studio 17 2022" -DSQLITECPP_RUN_CPPCHECK=OFF -DSQLITECPP_RUN_CPPLINT=OFF`：配置 MSVC Release 方案。
+- `cmake --build build --config Release`：产出发布版 `kcd2db.asi`。
+- `cmake --build build --config Debug`：生成含调试符号的 DLL，便于附加到游戏进程。
+- `ctest --test-dir build --output-on-failure`：仅在重新引入 CTest 目标且 `ctest` 可解析到 Windows CTest 后运行；当前 `CMakeLists.txt` 未定义测试目标。
 
 ## 编码风格与命名约定
 使用 C++20、MSVC，`CMakeLists.txt` 为 MSVC 添加 `/utf-8`。保持 4 空格缩进、左花括号换行，头文件使用 `#pragma once`。类型与类名用 PascalCase，成员变量使用 `m_` 前缀，成员函数沿用现有 PascalCase/CamelCase 风格，文件级辅助函数优先使用 snake_case；日志 API 为 `LogDebug/LogInfo/LogWarn/LogError`。优先采用 RAII（`std::unique_ptr`, `std::optional`, `std::atomic`）和 `std::string_view` 以避免不必要复制；业务辅助逻辑应放在 `src/`，不要写入 `external/cryengine` 镜像。
 
 ## 测试指南
-当前没有提交测试源或覆盖率配置。新增测试时请在 `CMakeLists.txt` 中显式启用 CTest 目标，并将测试源放入清晰的 `tests/` 子目录；涉及游戏 API 的行为应使用 stub 或可重复的日志/数据库快照。提交前至少运行可用的配置与构建命令，若新增了测试目标，再运行 `winexec ctest --test-dir build --output-on-failure`。
+当前没有提交测试源或覆盖率配置。新增测试时请在 `CMakeLists.txt` 中显式启用 CTest 目标，并将测试源放入清晰的 `tests/` 子目录；涉及游戏 API 的行为应使用 stub 或可重复的日志/数据库快照。提交前至少运行可用的配置与构建命令，若新增了测试目标，再确保 `ctest` 可解析到 Windows CTest 并运行 `ctest --test-dir build --output-on-failure`。
 
 ## 依赖与运行时调试
 依赖通过 CMake FetchContent 获取：libmem v5.0.4、SQLite3 v3.49.1、SQLiteCpp v3.3.1；游戏侧使用内置 `json.lua`，`src/lua/db.h` 会在需要时加载 `Scripts/Utils/JSON/json.lua`。运行时日志写入游戏进程工作目录下的 `kcd2db.log`，SQLite 数据库为 `kcd2db.db`；以 `-console` 启动游戏会额外打开调试控制台。Lua 侧可调用 `DB.Dump()` 或 `LuaDB.Dump()` 查看当前缓存内容。
