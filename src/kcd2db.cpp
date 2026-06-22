@@ -1,13 +1,18 @@
 #include <windows.h>
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <bit>
+#include <array>
 #include <cstdio>
+#include <cctype>
 #include <mutex>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 #include <libmem/libmem.h>
 
 #define KCD2_ENV_IMPORT
@@ -16,9 +21,216 @@
 #include <cryengine/IGame.h>
 #include "log/log.h"
 
+std::string bytes_to_pattern(const unsigned char* bytes, size_t size);
+
 namespace
 {
 constexpr std::string_view kHexDigits = "0123456789ABCDEF";
+constexpr auto kClientDll = "WHGame.DLL";
+
+std::string wide_to_utf8(const wchar_t* value)
+{
+    if (!value || value[0] == L'\0')
+    {
+        return {};
+    }
+
+    const int size = WideCharToMultiByte(CP_UTF8, 0, value, -1, nullptr, 0, nullptr, nullptr);
+    if (size <= 1)
+    {
+        return {};
+    }
+
+    std::string result(size, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, value, -1, result.data(), size, nullptr, nullptr);
+    result.resize(size - 1);
+    return result;
+}
+
+std::string get_module_path(HMODULE module)
+{
+    std::wstring buffer(MAX_PATH, L'\0');
+    DWORD size = 0;
+    while (true)
+    {
+        size = GetModuleFileNameW(module, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (size == 0)
+        {
+            return "<unknown>";
+        }
+        if (size < buffer.size() - 1)
+        {
+            buffer.resize(size);
+            return wide_to_utf8(buffer.c_str());
+        }
+        buffer.resize(buffer.size() * 2);
+    }
+}
+
+std::string get_current_directory_path()
+{
+    const DWORD required = GetCurrentDirectoryW(0, nullptr);
+    if (required == 0)
+    {
+        return "<unknown>";
+    }
+
+    std::wstring buffer(required, L'\0');
+    const DWORD size = GetCurrentDirectoryW(required, buffer.data());
+    if (size == 0)
+    {
+        return "<unknown>";
+    }
+    buffer.resize(size);
+    return wide_to_utf8(buffer.c_str());
+}
+
+std::string make_expected_db_path()
+{
+    std::string cwd = get_current_directory_path();
+    if (cwd.empty() || cwd == "<unknown>")
+    {
+        return "<unknown>\\kcd2db.db";
+    }
+
+    const char last = cwd.back();
+    if (last != '\\' && last != '/')
+    {
+        cwd += '\\';
+    }
+    cwd += "kcd2db.db";
+    return cwd;
+}
+
+std::string to_lower_ascii(std::string_view value)
+{
+    std::string result;
+    result.reserve(value.size());
+    for (const unsigned char ch : value)
+    {
+        result.push_back(static_cast<char>(std::tolower(ch)));
+    }
+    return result;
+}
+
+bool contains_diagnostic_token(const lm_module_t& module)
+{
+    const std::string text = to_lower_ascii(std::string(module.name) + " " + module.path);
+    constexpr std::array tokens = {"whgame", "kingdom", "cry", "game"};
+    return std::any_of(tokens.begin(), tokens.end(), [&](const char* token)
+    {
+        return text.find(token) != std::string::npos;
+    });
+}
+
+std::string format_module(const lm_module_t& module)
+{
+    std::ostringstream oss;
+    oss << "name=" << module.name
+        << ", path=" << module.path
+        << ", base=0x" << std::hex << std::uppercase << module.base
+        << ", size=0x" << module.size;
+    return oss.str();
+}
+
+void log_module_info(const char* prefix, const lm_module_t& module)
+{
+    const std::string info = format_module(module);
+    LogDebug("%s: %s", prefix, info.c_str());
+}
+
+struct ModuleDiagnostics
+{
+    std::vector<lm_module_t> matches;
+    std::vector<std::string> fallbackNames;
+    bool enumSucceeded = false;
+};
+
+lm_bool_t LM_CALL collect_module_diagnostics(lm_module_t* module, lm_void_t* arg)
+{
+    auto* diagnostics = static_cast<ModuleDiagnostics*>(arg);
+    if (!module)
+    {
+        return LM_TRUE;
+    }
+
+    if (contains_diagnostic_token(*module))
+    {
+        diagnostics->matches.push_back(*module);
+    }
+    if (diagnostics->fallbackNames.size() < 30)
+    {
+        diagnostics->fallbackNames.emplace_back(module->name);
+    }
+    return LM_TRUE;
+}
+
+void log_module_diagnostics()
+{
+    LogWarn("LM_FindModule(\"%s\") has not matched yet; enumerating loaded modules.", kClientDll);
+
+    ModuleDiagnostics diagnostics;
+    diagnostics.enumSucceeded = LM_EnumModules(collect_module_diagnostics, &diagnostics) == LM_TRUE;
+    if (!diagnostics.enumSucceeded)
+    {
+        LogWarn("LM_EnumModules failed while waiting for %s.", kClientDll);
+        return;
+    }
+
+    if (!diagnostics.matches.empty())
+    {
+        LogWarn("Relevant loaded modules matching WHGame/Kingdom/Cry/Game:");
+        for (const auto& module : diagnostics.matches)
+        {
+            const std::string info = format_module(module);
+            LogWarn("  %s", info.c_str());
+        }
+        return;
+    }
+
+    LogWarn("No relevant modules matched WHGame/Kingdom/Cry/Game. First %zu loaded modules:",
+            diagnostics.fallbackNames.size());
+    for (const auto& name : diagnostics.fallbackNames)
+    {
+        LogWarn("  %s", name.c_str());
+    }
+}
+
+void log_startup_diagnostics(HMODULE selfModule)
+{
+    LogDebug("kcd2db.asi path: %s", get_module_path(selfModule).c_str());
+    LogDebug("Process exe path: %s", get_module_path(nullptr).c_str());
+    LogDebug("Current working directory: %s", get_current_directory_path().c_str());
+    LogDebug("Expected DB path: %s", make_expected_db_path().c_str());
+    LogDebug("Command line: %s", wide_to_utf8(GetCommandLineW()).c_str());
+}
+
+void log_scan_module_error(const char* message, const lm_module_t& module)
+{
+    LogError("%s Module: %s", message, format_module(module).c_str());
+}
+
+void log_lea_context_window(uintptr_t leaInstructionAddr)
+{
+    constexpr size_t kWindowBefore = 16;
+    constexpr size_t kWindowAfter = 16;
+    constexpr size_t kWindowSize = kWindowBefore + 1 + kWindowAfter;
+
+    std::array<unsigned char, kWindowSize> bytes{};
+    const uintptr_t start = leaInstructionAddr - kWindowBefore;
+    if (LM_ReadMemory(start, reinterpret_cast<lm_byte_t*>(bytes.data()), bytes.size()))
+    {
+        const std::string window = bytes_to_pattern(bytes.data(), bytes.size());
+        LogError("LEA context bytes [0x%llX..0x%llX]: %s",
+                 start,
+                 start + bytes.size() - 1,
+                 window.c_str());
+    }
+    else
+    {
+        LogWarn("Failed to read LEA context bytes around 0x%llX.", leaInstructionAddr);
+    }
+}
 }
 
 // 将字节序列转换为 libmem 支持的模式
@@ -41,11 +253,26 @@ std::string bytes_to_pattern(const unsigned char* bytes, const size_t size)
 std::optional<uintptr_t> find_env_addr()
 {
     lm_module_t module;
-    constexpr auto CLIENT_DLL = "WHGame.DLL";
-    while (!LM_FindModule(CLIENT_DLL, &module))
+    using namespace std::chrono;
+    const auto waitStart = steady_clock::now();
+    auto nextDiagnosticTime = waitStart + seconds(10);
+    bool wroteInitialWaitLog = false;
+    while (!LM_FindModule(kClientDll, &module))
     {
-        std::this_thread::yield();
+        const auto now = steady_clock::now();
+        if (!wroteInitialWaitLog)
+        {
+            LogInfo("Waiting for module %s...", kClientDll);
+            wroteInitialWaitLog = true;
+        }
+        if (now >= nextDiagnosticTime)
+        {
+            log_module_diagnostics();
+            nextDiagnosticTime = now + seconds(30);
+        }
+        std::this_thread::sleep_for(milliseconds(100));
     }
+    log_module_info("Found target module", module);
     // --- 步骤 1: 找到 "exec autoexec.cfg" 字符串 ---
     constexpr std::string_view search_string = "exec autoexec.cfg";
     const auto string_pattern = bytes_to_pattern(
@@ -56,7 +283,7 @@ std::optional<uintptr_t> find_env_addr()
     const uintptr_t string_addr = LM_SigScan(string_pattern.c_str(), module.base, module.size);
     if (!string_addr)
     {
-        LogError("Could not find the anchor string 'exec autoexec.cfg'.");
+        log_scan_module_error("Could not find the anchor string 'exec autoexec.cfg'.", module);
         return std::nullopt;
     }
     LogDebug("Found anchor string at: 0x%llX", string_addr);
@@ -68,7 +295,7 @@ std::optional<uintptr_t> find_env_addr()
         const uintptr_t potential_lea = LM_SigScan("48 8D 15 ? ? ? ?", scan_start, module.size - (scan_start - module.base));
         if (!potential_lea)
         {
-            LogError("Could not find any cross-references (LEA) to the anchor string.");
+            log_scan_module_error("Could not find any cross-references (LEA) to the anchor string.", module);
             return std::nullopt;
         }
         int32_t rip_offset;
@@ -83,7 +310,7 @@ std::optional<uintptr_t> find_env_addr()
     }
     if (!lea_instruction_addr)
     {
-        LogError("Failed to locate the correct LEA instruction after scanning.");
+        log_scan_module_error("Failed to locate the correct LEA instruction after scanning.", module);
         return std::nullopt;
     }
     // --- 步骤 3: 检查上下文并定位 pConsole 的 MOV 指令 ---
@@ -114,7 +341,8 @@ std::optional<uintptr_t> find_env_addr()
     }
     if (!pConsole_mov_addr)
     {
-        LogError("Could not identify any known version context around the LEA instruction.");
+        log_scan_module_error("Could not identify any known version context around the LEA instruction.", module);
+        log_lea_context_window(lea_instruction_addr);
         return std::nullopt;
     }
     LogDebug("Found pConsole MOV instruction at: 0x%llX", pConsole_mov_addr);
@@ -122,7 +350,7 @@ std::optional<uintptr_t> find_env_addr()
     int32_t rip_offset;
     if (!LM_ReadMemory(pConsole_mov_addr + 3, reinterpret_cast<lm_byte_t*>(&rip_offset), sizeof(rip_offset)))
     {
-        LogError("Failed to read RIP offset from the MOV instruction.");
+        log_scan_module_error("Failed to read RIP offset from the MOV instruction.", module);
         return std::nullopt;
     }
     const uintptr_t console_ptr_addr = pConsole_mov_addr + 7 + rip_offset;
@@ -187,6 +415,7 @@ void start()
         VirtualProtect(&vTable[COMPLETE_INIT_INDEX], sizeof(void*), initialOldProtect, nullptr);
 
         LogDebug("Hooked CompleteInit function");
+        LogInfo("Using LuaDB database at: %s", make_expected_db_path().c_str());
         const auto luaDB = new LuaDB();
         gLuaDB.store(luaDB, std::memory_order_release);
         LogDebug("LuaDB initialized");
@@ -219,12 +448,12 @@ DWORD WINAPI main_thread(LPVOID)
     }
     catch (const std::exception& e)
     {
-        LogError("Flush: Error during flush: %s", e.what());
+        LogError("kcd2db main thread: %s", e.what());
         return 1;
     }
     catch (...)
     {
-        LogError("Flush: Unknown error during flush");
+        LogError("kcd2db main thread: Unknown error");
         return 1;
     }
     return 0;
@@ -236,9 +465,10 @@ BOOL APIENTRY DllMain(const HMODULE hModule, const DWORD reason, LPVOID /*lpRese
     if (reason == DLL_PROCESS_ATTACH)
     {
         DisableThreadLibraryCalls(hModule);
-        CreateThread(nullptr, 0, [](LPVOID /*unused*/) -> DWORD
+        CreateThread(nullptr, 0, [](LPVOID moduleHandle) -> DWORD
         {
             Log_init();
+            log_startup_diagnostics(static_cast<HMODULE>(moduleHandle));
             LogDebug("DLL attached");
             // 创建主工作线程
             // ReSharper disable once CppLocalVariableMayBeConst
@@ -251,7 +481,7 @@ BOOL APIENTRY DllMain(const HMODULE hModule, const DWORD reason, LPVOID /*lpRese
                 LogError("Failed to create main thread");
             }
             return 0;
-        }, nullptr, 0, nullptr);
+        }, hModule, 0, nullptr);
     }
     else if (reason == DLL_PROCESS_DETACH)
     {
