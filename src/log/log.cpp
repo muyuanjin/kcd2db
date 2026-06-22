@@ -10,11 +10,53 @@
 #include <iomanip>
 #include <iostream>
 #include <ostream>
+#include <string>
 #include <vector>
 #include <windows.h>
 
 auto Filename = "kcd2db.log";
 HANDLE ConsoleHandle = nullptr;
+
+namespace
+{
+std::string WideToUtf8(const wchar_t* value)
+{
+    if (!value || value[0] == L'\0')
+    {
+        return {};
+    }
+
+    const int size = WideCharToMultiByte(CP_UTF8, 0, value, -1, nullptr, 0, nullptr, nullptr);
+    if (size <= 1)
+    {
+        return {};
+    }
+
+    std::string result(size, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, value, -1, result.data(), size, nullptr, nullptr);
+    result.resize(size - 1);
+    return result;
+}
+
+std::string GetFullPath(const wchar_t* path)
+{
+    const DWORD required = GetFullPathNameW(path, 0, nullptr, nullptr);
+    if (required == 0)
+    {
+        return "<unknown>";
+    }
+
+    std::wstring buffer(required, L'\0');
+    const DWORD size = GetFullPathNameW(path, required, buffer.data(), nullptr);
+    if (size == 0)
+    {
+        return "<unknown>";
+    }
+
+    buffer.resize(size);
+    return WideToUtf8(buffer.c_str());
+}
+}
 
 // LogLevel 枚举和配置结构
 enum class LogLevel
@@ -221,6 +263,7 @@ void Log_init()
         std::tm tm{};
         localtime_s(&tm, &t);
         out << "\nLog initialized at " << std::put_time(&tm, "%F %T") << '\n';
+        out << "[DEBUG] Log file path: " << GetFullPath(L"kcd2db.log") << '\n';
         if (hasInvalidConsoleLogLevel)
         {
             out << "[WARN]  Invalid -kcd2dbConsoleLog value; using info." << '\n';

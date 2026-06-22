@@ -153,6 +153,8 @@ private:
 
     std::chrono::steady_clock::time_point m_lastSaveTime;
 
+    // Cleared after each global flush attempt, even on failure, to avoid retrying
+    // permanently unsavable data every frame. A later SetG/DelG marks it dirty again.
     bool m_globalDirty = false;
     bool m_registered = false;
 };

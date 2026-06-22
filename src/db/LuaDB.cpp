@@ -5,14 +5,123 @@
 #include "LuaDB.h"
 #include <cryengine/IConsole.h>
 #include <cryengine/IGame.h>
+#include <cstdint>
 #include <ranges>
 #include <sstream>
 #include <unordered_set>
 #include <string>
+#include <windows.h>
 #include "../lua/db.h"
 
 namespace
 {
+constexpr char kDatabasePath[] = "./kcd2db.db";
+constexpr wchar_t kDatabasePathWide[] = L".\\kcd2db.db";
+
+std::string WideToUtf8(const wchar_t* value)
+{
+    if (!value || value[0] == L'\0')
+    {
+        return {};
+    }
+
+    const int size = WideCharToMultiByte(CP_UTF8, 0, value, -1, nullptr, 0, nullptr, nullptr);
+    if (size <= 1)
+    {
+        return {};
+    }
+
+    std::string result(size, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, value, -1, result.data(), size, nullptr, nullptr);
+    result.resize(size - 1);
+    return result;
+}
+
+std::string GetFullPath(const wchar_t* path)
+{
+    const DWORD required = GetFullPathNameW(path, 0, nullptr, nullptr);
+    if (required == 0)
+    {
+        return "<unknown>";
+    }
+
+    std::wstring buffer(required, L'\0');
+    const DWORD size = GetFullPathNameW(path, required, buffer.data(), nullptr);
+    if (size == 0)
+    {
+        return "<unknown>";
+    }
+
+    buffer.resize(size);
+    return WideToUtf8(buffer.c_str());
+}
+
+void LogDatabaseFileDiagnostics(const char* stage)
+{
+    const std::string fullPath = GetFullPath(kDatabasePathWide);
+    WIN32_FILE_ATTRIBUTE_DATA data{};
+    if (!GetFileAttributesExW(kDatabasePathWide, GetFileExInfoStandard, &data))
+    {
+        LogWarn("SQLite database file check after %s: path=%s, GetFileAttributesExW failed with %lu.",
+                stage,
+                fullPath.c_str(),
+                GetLastError());
+        return;
+    }
+
+    const auto size = (static_cast<std::uint64_t>(data.nFileSizeHigh) << 32)
+        | static_cast<std::uint64_t>(data.nFileSizeLow);
+    LogDebug("SQLite database file check after %s: path=%s, attributes=0x%08lX, size=%llu bytes.",
+             stage,
+             fullPath.c_str(),
+             data.dwFileAttributes,
+             static_cast<unsigned long long>(size));
+}
+
+std::unique_ptr<SQLite::Database> OpenDatabase()
+{
+    const std::string fullPath = GetFullPath(kDatabasePathWide);
+    LogDebug("Opening SQLite database: relative path=%s, absolute path=%s, flags=OPEN_READWRITE|OPEN_CREATE.",
+             kDatabasePath,
+             fullPath.c_str());
+    try
+    {
+        auto db = std::make_unique<SQLite::Database>(kDatabasePath, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
+        LogDebug("SQLite database opened.");
+        LogDatabaseFileDiagnostics("open");
+        return db;
+    }
+    catch (const std::exception& e)
+    {
+        LogError("SQLite database open failed: relative path=%s, absolute path=%s, error=%s, GetLastError=%lu.",
+                 kDatabasePath,
+                 fullPath.c_str(),
+                 e.what(),
+                 GetLastError());
+        LogDatabaseFileDiagnostics("failed open");
+        throw;
+    }
+}
+
+void LogDatabaseList(SQLite::Database& db)
+{
+    try
+    {
+        SQLite::Statement stmt(db, "PRAGMA database_list");
+        while (stmt.executeStep())
+        {
+            LogDebug("SQLite database_list: seq=%d, name=%s, file=%s",
+                     stmt.getColumn(0).getInt(),
+                     stmt.getColumn(1).getString().c_str(),
+                     stmt.getColumn(2).getString().c_str());
+        }
+    }
+    catch (const std::exception& e)
+    {
+        LogWarn("Failed to query SQLite database_list: %s", e.what());
+    }
+}
+
 class TempTableGuard
 {
 public:
@@ -202,9 +311,11 @@ LuaDB::~LuaDB()
 
 // Database.cpp 优化版本
 LuaDB::LuaDB() :
-    m_db(std::make_unique<SQLite::Database>("./kcd2db.db", SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE)),
+    m_db(OpenDatabase()),
     m_lastSaveTime(std::chrono::steady_clock::now())
 {
+    LogDatabaseList(*m_db);
+
     ExecuteTransaction([](SQLite::Database& db)
     {
         db.exec(R"(
@@ -226,6 +337,8 @@ LuaDB::LuaDB() :
             )
         )");
     });
+    LogDebug("LuaDB schema initialization completed.");
+    LogDatabaseFileDiagnostics("schema initialization");
 
     SyncCacheWithDatabase();
 
@@ -524,7 +637,10 @@ void LuaDB::OnPostUpdate(float /*fDeltaTime*/)
     {
         LogError("Global save failed: Unknown error");
     }
-    m_globalDirty = false; // 重置标志,无论成功与否
+    // Clear even after failure: this prevents an unsavable value or persistent SQLite
+    // error from causing repeated high-frequency flush attempts. New SetG/DelG calls
+    // will mark the global cache dirty again.
+    m_globalDirty = false;
 }
 
 
