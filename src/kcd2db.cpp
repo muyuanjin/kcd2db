@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 #include <libmem/libmem.h>
 
@@ -35,6 +36,8 @@ namespace
 {
 constexpr std::string_view kHexDigits = "0123456789ABCDEF";
 constexpr auto kClientDll = "WHGame.DLL";
+constexpr auto kInitialModuleDiagnosticDelay = std::chrono::seconds(2);
+constexpr auto kMaxModuleDiagnosticDelay = std::chrono::minutes(2);
 
 std::string get_compiler_version()
 {
@@ -196,7 +199,15 @@ struct ModuleDiagnostics
 {
     std::vector<lm_module_t> matches;
     std::vector<std::string> fallbackNames;
+    std::unordered_set<std::string>* seenModules = nullptr;
+    size_t newModuleCount = 0;
     bool enumSucceeded = false;
+};
+
+struct ModuleDiagnosticState
+{
+    std::unordered_set<std::string> seenModules;
+    bool enumFailureLogged = false;
 };
 
 struct ModuleNameSearch
@@ -249,6 +260,13 @@ lm_bool_t LM_CALL collect_module_diagnostics(lm_module_t* module, lm_void_t* arg
         return LM_TRUE;
     }
 
+    const std::string key = to_lower_ascii(std::string(module->name) + "\n" + module->path);
+    if (diagnostics->seenModules && !diagnostics->seenModules->insert(key).second)
+    {
+        return LM_TRUE;
+    }
+
+    ++diagnostics->newModuleCount;
     if (contains_diagnostic_token(*module))
     {
         diagnostics->matches.push_back(*module);
@@ -260,21 +278,34 @@ lm_bool_t LM_CALL collect_module_diagnostics(lm_module_t* module, lm_void_t* arg
     return LM_TRUE;
 }
 
-void log_module_diagnostics()
+void log_module_diagnostics(ModuleDiagnosticState& state)
 {
-    LogWarn("LM_FindModule(\"%s\") has not matched yet; enumerating loaded modules.", kClientDll);
-
     ModuleDiagnostics diagnostics;
+    diagnostics.seenModules = &state.seenModules;
     diagnostics.enumSucceeded = LM_EnumModules(collect_module_diagnostics, &diagnostics) == LM_TRUE;
     if (!diagnostics.enumSucceeded)
     {
-        LogWarn("LM_EnumModules failed while waiting for %s.", kClientDll);
+        if (!state.enumFailureLogged)
+        {
+            LogWarn("LM_EnumModules failed while waiting for %s.", kClientDll);
+            state.enumFailureLogged = true;
+        }
+        return;
+    }
+    state.enumFailureLogged = false;
+
+    if (diagnostics.newModuleCount == 0)
+    {
         return;
     }
 
+    LogWarn("LM_FindModule(\"%s\") has not matched yet; enumerating %zu newly observed module(s).",
+            kClientDll,
+            diagnostics.newModuleCount);
+
     if (!diagnostics.matches.empty())
     {
-        LogWarn("Relevant loaded modules matching WHGame/Kingdom/Cry/Game:");
+        LogWarn("New relevant loaded modules matching WHGame/Kingdom/Cry/Game:");
         for (const auto& module : diagnostics.matches)
         {
             const std::string info = format_module(module);
@@ -283,7 +314,7 @@ void log_module_diagnostics()
         return;
     }
 
-    LogWarn("No relevant modules matched WHGame/Kingdom/Cry/Game. First %zu loaded modules:",
+    LogWarn("No new relevant modules matched WHGame/Kingdom/Cry/Game. First %zu newly observed module(s):",
             diagnostics.fallbackNames.size());
     for (const auto& name : diagnostics.fallbackNames)
     {
@@ -355,8 +386,10 @@ std::optional<uintptr_t> find_env_addr()
     lm_module_t module;
     using namespace std::chrono;
     const auto waitStart = steady_clock::now();
-    auto nextDiagnosticTime = waitStart + seconds(10);
+    auto moduleDiagnosticDelay = kInitialModuleDiagnosticDelay;
+    auto nextDiagnosticTime = waitStart + moduleDiagnosticDelay;
     bool wroteInitialWaitLog = false;
+    ModuleDiagnosticState moduleDiagnosticState;
     while (!find_target_module(module))
     {
         const auto now = steady_clock::now();
@@ -367,8 +400,13 @@ std::optional<uintptr_t> find_env_addr()
         }
         if (now >= nextDiagnosticTime)
         {
-            log_module_diagnostics();
-            nextDiagnosticTime = now + seconds(30);
+            log_module_diagnostics(moduleDiagnosticState);
+            moduleDiagnosticDelay *= 2;
+            if (moduleDiagnosticDelay > kMaxModuleDiagnosticDelay)
+            {
+                moduleDiagnosticDelay = kMaxModuleDiagnosticDelay;
+            }
+            nextDiagnosticTime = now + moduleDiagnosticDelay;
         }
         std::this_thread::sleep_for(milliseconds(100));
     }
