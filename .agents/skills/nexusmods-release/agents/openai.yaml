@@ -1,0 +1,6 @@
+interface:
+  display_name: "Nexus Mods Release"
+  short_description: "Prepare and publish Nexus Mods releases"
+  default_prompt: "Use $nexusmods-release to prepare a Nexus Mods release from the current repository."
+policy:
+  allow_implicit_invocation: false

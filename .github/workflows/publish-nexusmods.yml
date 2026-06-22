@@ -1,0 +1,120 @@
+name: Publish to Nexus Mods
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "GitHub Release tag to upload, for example v0.1.12"
+        required: true
+        type: string
+      asset_name:
+        description: "Release asset to upload. Defaults to the only archive asset on the release."
+        required: false
+        type: string
+      version:
+        description: "Nexus version string. Defaults to the tag without a leading v."
+        required: false
+        type: string
+      display_name:
+        description: "Nexus file version display name. Defaults to '<repository> <version>'."
+        required: false
+        type: string
+      description:
+        description: "Nexus file version description."
+        required: false
+        type: string
+      archive_existing_version:
+        description: "Archive the current Nexus file version after upload"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nexusmods-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish existing release asset
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Prepare Nexus upload metadata
+        id: meta
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_ASSET_NAME: ${{ inputs.asset_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_DISPLAY_NAME: ${{ inputs.display_name }}
+          INPUT_DESCRIPTION: ${{ inputs.description }}
+        run: |
+          set -euo pipefail
+
+          tag="${INPUT_TAG}"
+          version="${INPUT_VERSION:-${tag#v}}"
+          asset_name="${INPUT_ASSET_NAME}"
+          if [[ -z "${asset_name}" ]]; then
+            mapfile -t archive_assets < <(
+              gh release view "${tag}" --json assets --jq '.assets[].name' |
+                grep -Ei '\.(zip|7z|rar)$' || true
+            )
+
+            if [[ "${#archive_assets[@]}" -ne 1 ]]; then
+              printf 'Expected exactly one archive asset on %s, found %s:\n' "${tag}" "${#archive_assets[@]}" >&2
+              printf '  %s\n' "${archive_assets[@]}" >&2
+              exit 1
+            fi
+
+            asset_name="${archive_assets[0]}"
+          fi
+
+          display_name="${INPUT_DISPLAY_NAME:-${GITHUB_REPOSITORY#*/} ${version}}"
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "asset_name=${asset_name}" >> "$GITHUB_OUTPUT"
+          echo "display_name=${display_name}" >> "$GITHUB_OUTPUT"
+
+          description_delimiter="nexus_description_$(uuidgen | tr '[:upper:]' '[:lower:]')"
+          {
+            echo "description<<${description_delimiter}"
+            if [[ -n "${INPUT_DESCRIPTION}" ]]; then
+              printf '%s\n' "${INPUT_DESCRIPTION}"
+            else
+              printf 'Stable release %s\n' "${version}"
+            fi
+            echo "${description_delimiter}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Download GitHub release asset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          ASSET_NAME: ${{ steps.meta.outputs.asset_name }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p nexus-upload
+          gh release download "${RELEASE_TAG}" --pattern "${ASSET_NAME}" --dir nexus-upload --clobber
+          test -f "nexus-upload/${ASSET_NAME}"
+
+      - name: Upload to Nexus Mods
+        id: upload
+        uses: Nexus-Mods/upload-action@v1.0.0-beta.8
+        with:
+          api_key: ${{ secrets.NEXUSMODS_API_KEY }}
+          file_id: ${{ vars.NEXUSMODS_FILE_ID }}
+          filename: nexus-upload/${{ steps.meta.outputs.asset_name }}
+          version: ${{ steps.meta.outputs.version }}
+          display_name: ${{ steps.meta.outputs.display_name }}
+          description: ${{ steps.meta.outputs.description }}
+          category: main
+          archive_existing_version: ${{ inputs.archive_existing_version }}

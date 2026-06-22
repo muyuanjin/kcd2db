@@ -56,21 +56,48 @@ jobs:
           Copy-Item asi-loader\*.dll release-package
           Compress-Archive -Path release-package\* -DestinationPath kcd2db-${{ github.REF_NAME }}.zip
 
+      - name: Generate release notes
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+
+          try {
+            $generatedNotes = (gh api "repos/$env:GITHUB_REPOSITORY/releases/generate-notes" `
+              --method POST `
+              -f tag_name="$env:RELEASE_TAG" `
+              -f target_commitish="$env:GITHUB_SHA" `
+              --jq ".body") -join "`n"
+          } catch {
+            $commits = git log -n 20 --pretty="- %h %s" | Out-String
+            $generatedNotes = "## Changes`n`n$commits"
+          }
+
+          $body = @"
+          $generatedNotes
+
+          ## Installation
+
+          Extract **ALL** files from this ZIP to your game directory:
+          ``KingdomComeDeliverance2/Bin/Win64MasterMasterSteamPGO/``
+
+          Contains:
+          - Mod ASI file ($env:GITHUB_REPOSITORY)
+          - Latest Ultimate-ASI-Loader (x64)
+
+          ## Debugging
+          - Launch with ``-console`` for debug window
+          "@
+
+          $body = ($body -split "`r?`n" | ForEach-Object { $_ -replace "^\s{10}", "" }) -join "`n"
+          Set-Content -Path release-notes.md -Value $body -Encoding utf8
+
       - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
           files: kcd2db-${{ github.REF_NAME }}.zip
           make_latest: true
-          generate_release_notes: true
-          body: |
-            ## Installation
-
-            Extract **ALL** files from this ZIP to your game directory:
-            `KingdomComeDeliverance2/Bin/Win64MasterMasterSteamPGO/`
-
-            Contains:
-            - Mod ASI file (${{ github.repository }})
-            - Latest Ultimate-ASI-Loader (x64)
-
-            ## Debugging
-            - Launch with `-console` for debug window
+          body_path: release-notes.md

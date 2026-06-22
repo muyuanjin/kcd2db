@@ -31,6 +31,11 @@
 ## 提交与拉取请求指南
 按照历史记录（如 `Refactor: 使用 std::bit_cast 替代 static_cast 进行虚表函数指针转换`、`Fix #1 Lua crash in multithreaded execution`）保持简短祈使句式，首字母大写，必要时引用 issue 编号或模块前缀。单个提交聚焦一个主题并包含相关验证。PR 描述需概述动机、方案与验证步骤；若修改影响游戏内接口，附加 Lua 片段示例能加速评审。
 
+## 版本发布与 Release Notes
+当用户要求 agent 创建或推送发布 tag（例如 `v0.1.13`）时，不要只依赖 GitHub 自动生成的 release notes。发布前必须主动收集上一个 GitHub Release/tag 到目标版本的提交、变更文件和相关 issue/PR 信息，并由 agent 编写面向用户的 release notes。内容应突出玩家或 Mod 使用者需要知道的支持性、崩溃修复、存档/数据风险、安装变化和调试信息；内部重构、workflow、文档、第三方头文件整理等与用户无关的变化应简要带过或省略。生成 notes 后先展示给用户确认，未经确认不要推送 tag 或触发发布。
+
+确认发布后，按现有 tag workflow 推送 tag。等待 GitHub Actions 创建/更新 Release 与上传资产后，用用户确认过的正文更新 GitHub Release，例如 `gh release edit <tag> --notes-file <notes.md>`。如果发布同时准备同步到 Nexus Mods，应基于同一份用户确认过的变更摘要再压缩成 Nexus 页面适合的简短说明，并再次确认是否上传。
+
 ## 安全与配置提示
 模块会修改游戏虚表与内存保护，请勿在未经验证的地址上尝试新钩子；偏移和签名扫描逻辑应集中在 `src/kcd2db.cpp` 或专用常量附近，便于热修复。当前设计不支持 `FreeLibrary` 热卸载，禁用模块需要移除或重命名 `.asi` 后重启游戏。提交前确认 `kcd2db.log` 与 `kcd2db.db` 仍使用相对游戏进程工作目录，同时避免将真实游戏资源或密钥推送到仓库。
 
