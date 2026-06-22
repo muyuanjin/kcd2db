@@ -121,7 +121,9 @@ All methods support both . Call and : Call syntax, which can be selected accordi
 4. The JSON string size of a single object should not exceed 1 billion bytes (approximately 953MB), otherwise Sqlite will report an error "string or blob too big," making it impossible to store.
 5. When using `Dump()`, $0~9 in strings will be parsed as color codes by the console. The in-game console cannot display non-ASCII characters, and DEBUG log data will be truncated to prevent lag.
 
-### Save-associated APIs
+### Raw save-associated APIs
+
+`LuaDB.*` is the low-level C++ binding. It stores Lua booleans, numbers, and strings directly. Use the `DB` wrapper above when you need JSON-backed tables or other JSON-encodable Lua values.
 
 ```lua
 -- Store data (automatically bound to current save)
@@ -137,7 +139,7 @@ LuaDB.Del(key)
 local exists = LuaDB.Exi(key)
 ```
 
-### Global APIs (Cross-save)
+### Raw global APIs (Cross-save)
 
 ```lua
 -- Store global data
@@ -160,16 +162,12 @@ local exists = LuaDB.ExiG(key)
 LuaDB.Dump()
 ```
 
-## Supported Data Types
+## Data Type Notes
 
-- Key : must be a string
-- Value : can be a boolean, number, or string
-
-| Type    | Storage Format         | Notes                                       |
-|---------|------------------------|---------------------------------------------|
-| Boolean | 0/1                    | 0 represents false                          |
-| Number  | Single-precision float |                                             |
-| String  | Latin1 encoding        | After testing, it can save a string of 10MB |
+- `DB` wrapper keys are namespaced strings. Non-string keys are JSON-encoded or converted to strings before the namespace prefix is added.
+- `DB` wrapper values are JSON-encoded before being passed to `LuaDB`, so tables, strings, numbers, booleans, and JSON-encodable nested values are supported when `json.lua` is available.
+- Raw `LuaDB` values are limited to booleans, numbers, and strings because the C++ layer stores `ScriptValue` as `bool`, `float`, or `std::string`.
+- Raw numbers are stored as single-precision floats. Raw booleans are stored as `0`/`1`. Strings are stored as SQLite `TEXT`.
 
 ## Usage Examples
 
@@ -188,8 +186,10 @@ LuaDB.Dump()
 
 ## Build
 
-- `cmake -B build -G "Visual Studio 17 2022" -DSQLITECPP_RUN_CPPLINT=OFF`
+- `cmake -B build -G "Visual Studio 17 2022" -DSQLITECPP_RUN_CPPCHECK=OFF -DSQLITECPP_RUN_CPPLINT=OFF`
 - `cmake --build build --config Release`
+
+When building from WSL for this shared Windows repository, run the same commands through `winexec`.
 
 ## Debugging
 
@@ -326,7 +326,9 @@ YourMod:Init()
 4. 单个对象的JSON字符串大小不应超过10亿字节（约953MB），否则Sqlite会报错“字符串或二进制数据过大”，导致无法存储。
 5. 使用`Dump()`时，字符串中的$0~9将被控制台解析为颜色代码。游戏内控制台无法显示非ASCII字符，DEBUG日志数据将被截断以防止卡顿。
 
-### 存档关联API
+### 原始存档关联 API
+
+`LuaDB.*` 是底层 C++ 绑定，只直接存储 Lua 布尔值、数字和字符串。需要表或其他可 JSON 编码的 Lua 值时，请优先使用上方的 `DB` 包装层。
 
 ```lua
 -- 存储数据（自动关联当前存档）
@@ -342,7 +344,7 @@ LuaDB.Del(key)
 local exists = LuaDB.Exi(key)
 ```
 
-### 全局API（跨存档）
+### 原始全局 API（跨存档）
 
 ```lua
 -- 存储全局数据
@@ -365,16 +367,12 @@ local exists = LuaDB.ExiG(key)
 LuaDB.Dump()
 ```
 
-## 数据类型支持
+## 数据类型说明
 
-- Key : 必须是字符串
-- Value : 可以是布尔值、数字或字符串
-
-| 类型  | 存储格式      | 说明                  |
-|-----|-----------|---------------------|
-| 布尔值 | 0/1       | 0表示false            |
-| 数字  | 单精度浮点     |                     |
-| 字符串 | Latin1 编码 | 经过测试，它可以保存一个10MB字符串 |
+- `DB` 包装层的键会带命名空间前缀；非字符串键会先经过 JSON 编码，失败时再转为字符串。
+- `DB` 包装层的值会先 JSON 编码再传给 `LuaDB`，因此在 `json.lua` 可用时支持表、字符串、数字、布尔值以及可 JSON 编码的嵌套值。
+- 原始 `LuaDB` 值仅支持布尔值、数字和字符串，因为 C++ 层的 `ScriptValue` 只保存 `bool`、`float` 或 `std::string`。
+- 原始数字以单精度浮点存储，布尔值以 `0`/`1` 存储，字符串以 SQLite `TEXT` 存储。
 
 ## 使用示例
 
@@ -393,8 +391,10 @@ LuaDB.Dump()
 
 ## 构建
 
-- `cmake -B build -G "Visual Studio 17 2022" -DSQLITECPP_RUN_CPPLINT=OFF`
+- `cmake -B build -G "Visual Studio 17 2022" -DSQLITECPP_RUN_CPPCHECK=OFF -DSQLITECPP_RUN_CPPLINT=OFF`
 - `cmake --build build --config Release`
+
+在 WSL 的共享 Windows 仓库中构建时，请通过 `winexec` 运行相同命令。
 
 ## 调试
 
