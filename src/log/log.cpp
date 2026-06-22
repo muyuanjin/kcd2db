@@ -5,6 +5,7 @@
 #include <cryengine/env.h>
 #include <cryengine/IConsole.h>
 
+#include <cwchar>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -18,12 +19,14 @@ HANDLE ConsoleHandle = nullptr;
 // LogLevel 枚举和配置结构
 enum class LogLevel
 {
-    Debug, Info, Warn, Error
+    Debug, Info, Warn, Error, Off
 };
+
+LogLevel ConsoleLogLevel = LogLevel::Info;
 
 struct LogConfig
 {
-    const char* colorPrefix;
+    const char* colorCode;
     const char* plainPrefix;
     WORD consoleColor;
 };
@@ -33,16 +36,82 @@ LogConfig GetLogConfig(const LogLevel level)
     switch (level)
     {
     case LogLevel::Debug:
-        return {"$3[DEBUG] ", "[DEBUG] ", FOREGROUND_GREEN};
+        return {"$3", "[DEBUG] ", FOREGROUND_GREEN};
     case LogLevel::Info:
-        return {"$5[INFO]  ", "[INFO]  ", FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY};
+        return {"$5", "[INFO]  ", FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY};
     case LogLevel::Warn:
-        return {"$6[WARN]  ", "[WARN]  ", FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY};
+        return {"$6", "[WARN]  ", FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY};
     case LogLevel::Error:
-        return {"$4[ERROR] ", "[ERROR] ", FOREGROUND_RED | FOREGROUND_INTENSITY};
+        return {"$4", "[ERROR] ", FOREGROUND_RED | FOREGROUND_INTENSITY};
     default:
         return {"", "", FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_GREEN};
     }
+}
+
+bool ShouldWriteToConsole(const LogLevel level)
+{
+    return ConsoleLogLevel != LogLevel::Off && level >= ConsoleLogLevel;
+}
+
+bool TryParseLogLevel(const wchar_t* value, LogLevel& level)
+{
+    if (_wcsicmp(value, L"debug") == 0)
+    {
+        level = LogLevel::Debug;
+        return true;
+    }
+    if (_wcsicmp(value, L"info") == 0)
+    {
+        level = LogLevel::Info;
+        return true;
+    }
+    if (_wcsicmp(value, L"warn") == 0)
+    {
+        level = LogLevel::Warn;
+        return true;
+    }
+    if (_wcsicmp(value, L"error") == 0)
+    {
+        level = LogLevel::Error;
+        return true;
+    }
+    if (_wcsicmp(value, L"off") == 0)
+    {
+        level = LogLevel::Off;
+        return true;
+    }
+    return false;
+}
+
+bool LoadConsoleLogLevelFromCommandLine()
+{
+    int argc;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (!argv) return false;
+
+    bool hasInvalidValue = false;
+    constexpr auto prefix = L"-kcd2dbConsoleLog=";
+    constexpr auto prefixLength = sizeof(L"-kcd2dbConsoleLog=") / sizeof(wchar_t) - 1;
+
+    for (int i = 1; i < argc; i++)
+    {
+        if (_wcsnicmp(argv[i], prefix, prefixLength) == 0)
+        {
+            LogLevel level = LogLevel::Info;
+            if (TryParseLogLevel(argv[i] + prefixLength, level))
+            {
+                ConsoleLogLevel = level;
+            }
+            else
+            {
+                ConsoleLogLevel = LogLevel::Info;
+                hasInvalidValue = true;
+            }
+        }
+    }
+
+    LocalFree(argv);
+    return hasInvalidValue;
 }
 
 // 通用可变参数处理函数
@@ -62,23 +131,25 @@ static void LogVA(LogLevel level, const char* format, va_list args)
     // 获取配置
     const auto config = GetLogConfig(level);
 
+    const bool writeToConsole = ShouldWriteToConsole(level);
+
     // 写入系统控制台
-    if (ConsoleHandle)
+    if (writeToConsole && ConsoleHandle)
     {
         CONSOLE_SCREEN_BUFFER_INFO originalInfo;
         GetConsoleScreenBufferInfo(ConsoleHandle, &originalInfo);
 
         SetConsoleTextAttribute(ConsoleHandle, config.consoleColor);
-        std::string consoleMsg = config.plainPrefix + message + "\n";
+        std::string consoleMsg = std::string("[kcd2db]") + config.plainPrefix + message + "\n";
         DWORD written;
         WriteConsoleA(ConsoleHandle, consoleMsg.c_str(), consoleMsg.length(), &written, nullptr);
         SetConsoleTextAttribute(ConsoleHandle, originalInfo.wAttributes);
     }
 
     // 写入游戏控制台
-    if (gEnv && gEnv->pConsole)
+    if (writeToConsole && gEnv && gEnv->pConsole)
     {
-        std::string consoleMsg = config.colorPrefix + message + "\n";
+        std::string consoleMsg = std::string(config.colorCode) + "[kcd2db]" + config.plainPrefix + message + "\n";
         gEnv->pConsole->PrintLine(consoleMsg.c_str());
     }
 
@@ -87,7 +158,7 @@ static void LogVA(LogLevel level, const char* format, va_list args)
     {
         logFile << config.plainPrefix << message << std::endl;
     }
-    else if (ConsoleHandle)
+    else if (writeToConsole && ConsoleHandle)
     {
         const auto error = "[ERROR] Could not open log file.\n";
         DWORD written;
@@ -132,6 +203,7 @@ void InitConsole()
 // 日志系统初始化
 void Log_init()
 {
+    const bool hasInvalidConsoleLogLevel = LoadConsoleLogLevelFromCommandLine();
     InitConsole();
     constexpr size_t max_size = 10 * 1024 * 1024;
     // 检查并清空过大的日志文件
@@ -149,6 +221,10 @@ void Log_init()
         std::tm tm{};
         localtime_s(&tm, &t);
         out << "\nLog initialized at " << std::put_time(&tm, "%F %T") << '\n';
+        if (hasInvalidConsoleLogLevel)
+        {
+            out << "[WARN]  Invalid -kcd2dbConsoleLog value; using info." << '\n';
+        }
     }
     else
     {

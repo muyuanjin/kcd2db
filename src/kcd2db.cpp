@@ -59,7 +59,7 @@ std::optional<uintptr_t> find_env_addr()
         LogError("Could not find the anchor string 'exec autoexec.cfg'.");
         return std::nullopt;
     }
-    LogInfo("Found anchor string at: 0x%llX", string_addr);
+    LogDebug("Found anchor string at: 0x%llX", string_addr);
     // --- 步骤 2: 找到引用该字符串的 LEA 指令 ---
     uintptr_t lea_instruction_addr = 0;
     uintptr_t scan_start = module.base;
@@ -76,7 +76,7 @@ std::optional<uintptr_t> find_env_addr()
         if (const uintptr_t referenced_addr = potential_lea + 7 + rip_offset; referenced_addr == string_addr)
         {
             lea_instruction_addr = potential_lea;
-            LogInfo("Found LEA instruction referencing the string at: 0x%llX", lea_instruction_addr);
+            LogDebug("Found LEA instruction referencing the string at: 0x%llX", lea_instruction_addr);
             break;
         }
         scan_start = potential_lea + 1;
@@ -94,7 +94,7 @@ std::optional<uintptr_t> find_env_addr()
     if (LM_ReadMemory(lea_instruction_addr - 7, v1_6_context_bytes, 7) &&
         memcmp(v1_6_context_bytes, "\x4C\x8B\x92\x18\x01\x00\x00", 7) == 0)
     {
-        LogInfo("Version context matches 'New' (V1.4+) pattern.");
+        LogDebug("Version context matches 'New' (V1.4+) pattern.");
         // 在 V1.4 中, 'mov rcx, cs:qword_...' 在 lea 指令前 0x17 (23) 字节
         // 0x180C9D574 (lea) - 0x180C9D55D (mov) = 0x17
         pConsole_mov_addr = lea_instruction_addr - 0x17;
@@ -107,7 +107,7 @@ std::optional<uintptr_t> find_env_addr()
         if (LM_ReadMemory(lea_instruction_addr - 7, old_version_opcode, 3) &&
             memcmp(old_version_opcode, "\x48\x8B\x0D", 3) == 0)
         {
-            LogInfo("Version context matches 'Old' (V1.3, V1.2, etc.) pattern.");
+            LogDebug("Version context matches 'Old' (V1.3, V1.2, etc.) pattern.");
             // 在旧版模式中，该指令就在 lea 前 7 个字节
             pConsole_mov_addr = lea_instruction_addr - 7;
         }
@@ -117,7 +117,7 @@ std::optional<uintptr_t> find_env_addr()
         LogError("Could not identify any known version context around the LEA instruction.");
         return std::nullopt;
     }
-    LogInfo("Found pConsole MOV instruction at: 0x%llX", pConsole_mov_addr);
+    LogDebug("Found pConsole MOV instruction at: 0x%llX", pConsole_mov_addr);
     // --- 步骤 4: 从 MOV 指令计算 gEnv 地址 ---
     int32_t rip_offset;
     if (!LM_ReadMemory(pConsole_mov_addr + 3, reinterpret_cast<lm_byte_t*>(&rip_offset), sizeof(rip_offset)))
@@ -147,7 +147,7 @@ bool __thiscall Hooked_CompleteInit(IGame* pThis)
         luaDB = gLuaDB.load(std::memory_order_acquire);
     }
     luaDB->RegisterLuaAPI();
-    LogInfo("Hooked_CompleteInit completed");
+    LogDebug("Hooked_CompleteInit completed");
     return OriginalCompleteInit(pThis);
 }
 
@@ -189,7 +189,7 @@ void start()
         LogDebug("Hooked CompleteInit function");
         const auto luaDB = new LuaDB();
         gLuaDB.store(luaDB, std::memory_order_release);
-        LogInfo("LuaDB initialized");
+        LogDebug("LuaDB initialized");
 
         while (env_ptr->pGame->GetIGameFramework() == nullptr
             || !env_ptr->pGame->GetIGameFramework()->IsGameStarted())

@@ -195,7 +195,8 @@ When building from WSL for this shared Windows repository, run the same commands
 
 - Uses SQLite3 database named `kcd2db.db` in game root
 - Operation logs stored in `kcd2db.log` in game root
-- If launched with `-console`, debug output will also appear in a separate console window
+- If launched with `-console`, `INFO`, `WARN`, and `ERROR` logs also appear in the console by default with a `[kcd2db]` prefix. `DEBUG` logs remain in `kcd2db.log`.
+- Use `-kcd2dbConsoleLog=debug|info|warn|error|off` to change console log verbosity.
 
 ## Important Notes
 
@@ -400,7 +401,8 @@ LuaDB.Dump()
 
 - 使用位于游戏根目录下名为 `kcd2db.db` 的 SQLite3 数据库
 - 操作日志存储在游戏根目录下的 `kcd2db.log` 文件中
-- 如果使用 `-console` 参数启动，调试输出也会显示在单独的控制台窗口中
+- 如果使用 `-console` 参数启动，默认只在控制台显示 `INFO`、`WARN` 和 `ERROR` 日志，并带有 `[kcd2db]` 前缀。`DEBUG` 日志仍会写入 `kcd2db.log`。
+- 使用 `-kcd2dbConsoleLog=debug|info|warn|error|off` 调整控制台日志详细程度。
 
 ## 注意事项
 

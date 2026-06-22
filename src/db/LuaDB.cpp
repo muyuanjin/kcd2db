@@ -276,9 +276,9 @@ void LuaDB::RegisterLuaAPI()
     LogDebug("Registered LuaDB method Dump");
 
     m_pSS->ExecuteBuffer(db_lua, strlen(db_lua), "db.lua");
-    LogInfo("DB lua API loaded");
+    LogDebug("DB lua API loaded");
     gEnv->pGame->GetIGameFramework()->RegisterListener(this, "LuaDB", FRAMEWORKLISTENERPRIORITY_DEFAULT);
-    LogInfo("LuaDB registered as game framework listener");
+    LogDebug("LuaDB registered as game framework listener");
     LogInfo("LuaDB loading completed.");
 }
 
