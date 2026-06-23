@@ -57,6 +57,8 @@ Find the upload asset in this order:
 
 ## Context Collection
 
+When Nexus Mods API details, upload-action behavior, or file-description limits matter, read `references/nexusmods-api.md` before browsing the web. Use that reference for stable entry points and known public API constraints; browse only to confirm behavior that may have changed.
+
 Use the helper script when possible:
 
 ```bash
