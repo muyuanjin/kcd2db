@@ -106,6 +106,8 @@ Use a mod-specific path such as `scripts/<modid>/kcd2db_fake_db.lua` to avoid PA
 
 See [docs/fake-db.md](docs/fake-db.md) for packaging details and backend status fields.
 
+The standalone fake DB release ZIP installs as `Mods/aaa_kcd_fake_db/` so it loads early among manually installed local mods under the default alphabetical load order. This cannot override Steam Workshop load order or a user-defined `Mods/mod_order.txt`; if `mod_order.txt` exists, list `aaa_kcd_fake_db` before mods that call `DB.Create`.
+
 # DB API Documentation
 
 ## Global Methods
@@ -332,6 +334,8 @@ local db = DB.Create("MyMod")
 建议使用 `scripts/<modid>/kcd2db_fake_db.lua` 这类独立路径，避免多个 Mod 在合并 PAK 时覆盖同一个脚本路径。安装了 `kcd2db.asi` 时，fake DB 文件会保留真实持久化后端；未安装时，会提供仅当前 Lua session 有效的 fake 后端，让 Mod 继续运行，但数据只保存在内存中，不会写入磁盘，也不按存档切换隔离。
 
 打包方式和后端状态字段见 [docs/fake-db.md](docs/fake-db.md)。
+
+独立 fake DB 发布 ZIP 会安装为 `Mods/aaa_kcd_fake_db/`，在默认字母序规则下尽量早于其他本地手动安装 Mod 加载。它不能覆盖 Steam Workshop 的加载顺序，也不能覆盖用户自定义的 `Mods/mod_order.txt`；如果存在 `mod_order.txt`，需要把 `aaa_kcd_fake_db` 写在调用 `DB.Create` 的 Mod 前面。
 
 # DB API 文档
 

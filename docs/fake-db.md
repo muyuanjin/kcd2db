@@ -41,3 +41,19 @@ KCD2DB.conflicts   -- replaced or overwritten global values, when any
 ```
 
 Mods should generally call `DB.Create` and use the returned object. Check `KCD2DB.persistent` only when the user experience needs to change without persistent storage.
+
+## Standalone Fake DB Package
+
+The release ZIP `kcd2db_fake_db-<version>.zip` installs a separate diagnostic mod:
+
+```text
+Mods/aaa_kcd_fake_db/
+  mod.manifest
+  data/aaa_kcd_fake_db.pak
+```
+
+The `aaa_` prefix makes the standalone mod load early among manually installed local mods when the game uses its default alphabetical `Mods/` loading order.
+
+This is still only a best-effort fallback. Steam Workshop mods load before local `Mods/`, and a user-created `Mods/mod_order.txt` overrides the default order. If `mod_order.txt` exists, `aaa_kcd_fake_db` must be listed before mods that call `DB.Create`, otherwise the fake DB package may not load in time.
+
+For a mod author's own release, the most reliable approach is still to bundle `kcd2db_fake_db.lua` inside that mod's own PAK and load it before any `DB.Create` call.

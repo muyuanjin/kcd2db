@@ -6,9 +6,9 @@ from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile, ZipInfo
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MOD_ID = "kcd_fake_db"
-MOD_FOLDER = "kcd_fake_db"
-PAK_NAME = "kcd_fake_db.pak"
+MOD_ID = "aaa_kcd_fake_db"
+MOD_FOLDER = "aaa_kcd_fake_db"
+PAK_NAME = "aaa_kcd_fake_db.pak"
 FAKE_DB_SOURCE_PATH = ROOT / "dist" / "kcd2db_fake_db.lua"
 ASSET_PREFIX = "kcd2db_fake_db"
 
