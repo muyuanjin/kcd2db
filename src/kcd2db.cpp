@@ -21,6 +21,7 @@
 #include <cryengine/env.h>
 #include <cryengine/IGame.h>
 #include "log/log.h"
+#include "lua/LuaRunner.h"
 
 #ifndef KCD2DB_VERSION
 #define KCD2DB_VERSION "dev"
@@ -364,7 +365,7 @@ void log_lea_context_window(uintptr_t leaInstructionAddr)
 }
 }
 
-// 将字节序列转换为 libmem 支持的模式
+// 将字节序列转换为 libmem 可用的模式
 std::string bytes_to_pattern(const unsigned char* bytes, const size_t size)
 {
     std::string pattern;
@@ -703,6 +704,7 @@ BOOL APIENTRY DllMain(const HMODULE hModule, const DWORD reason, LPVOID lpReserv
     }
     else if (reason == DLL_PROCESS_DETACH)
     {
+        LuaRunner::Instance().Stop();
         // Full hot unload is unsupported. On FreeLibrary, only restore our vtable slot
         // so it does not point at unloaded code; avoid game-owned objects during process teardown.
         if (lpReserved == nullptr)

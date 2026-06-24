@@ -64,6 +64,6 @@ target_compile_definitions(kcd2db PRIVATE
         KCD2DB_BUILD_CONFIG="$<CONFIG>"
 )
 
-target_link_libraries(kcd2db PRIVATE cryengine_sdk libmem::libmem ntdll SQLiteCpp SQLite::SQLite3)
+target_link_libraries(kcd2db PRIVATE cryengine_sdk libmem::libmem ntdll shell32 ws2_32 SQLiteCpp SQLite::SQLite3)
 
 set_target_properties(kcd2db PROPERTIES SUFFIX ".asi" PREFIX "")

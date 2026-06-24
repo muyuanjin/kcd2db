@@ -56,6 +56,10 @@ jobs:
           Copy-Item asi-loader\*.dll release-package
           Compress-Archive -Path release-package\* -DestinationPath kcd2db-${{ github.REF_NAME }}.zip
 
+      - name: Package fake DB fallback mod
+        run: |
+          python tools\package_fake_db_mod.py --version "${{ github.ref_name }}" --output "kcd2db_fake_db-${{ github.ref_name }}.zip"
+
       - name: Generate release notes
         shell: pwsh
         env:
@@ -88,6 +92,15 @@ jobs:
           - Mod ASI file ($env:GITHUB_REPOSITORY)
           - Latest Ultimate-ASI-Loader (x64)
 
+          ## Mod Authors
+          Download ``kcd2db_fake_db.lua`` from the release assets if you want to bundle
+          the optional Lua fake DB layer in your own mod.
+
+          ## Troubleshooting
+          ``kcd2db_fake_db-$env:RELEASE_TAG.zip`` is a diagnostic fallback mod. It
+          provides a session-only fake DB backend for testing kcd2db-dependent Lua mods
+          without the ASI plugin. It does not save data to disk.
+
           ## Debugging
           - Launch with ``-console`` for debug window
           "@
@@ -98,6 +111,9 @@ jobs:
       - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
-          files: kcd2db-${{ github.REF_NAME }}.zip
+          files: |
+            kcd2db-${{ github.REF_NAME }}.zip
+            dist/kcd2db_fake_db.lua
+            kcd2db_fake_db-${{ github.ref_name }}.zip
           make_latest: true
           body_path: release-notes.md

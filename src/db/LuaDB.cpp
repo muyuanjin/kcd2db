@@ -5,6 +5,7 @@
 #include "LuaDB.h"
 #include <cryengine/IConsole.h>
 #include <cryengine/IGame.h>
+#include <cwchar>
 #include <cstdint>
 #include <ranges>
 #include <sstream>
@@ -12,6 +13,7 @@
 #include <string>
 #include <windows.h>
 #include "../lua/db.h"
+#include "../lua/LuaRunner.h"
 
 namespace
 {
@@ -158,6 +160,39 @@ private:
     SQLite::Database& m_db;
     std::string m_tableName;
 };
+
+const char* ScriptAnyTypeName(const ScriptAnyType type)
+{
+    switch (type)
+    {
+    case ANY_ANY: return "any";
+    case ANY_TNIL: return "nil";
+    case ANY_TBOOLEAN: return "boolean";
+    case ANY_THANDLE: return "handle";
+    case ANY_TNUMBER: return "number";
+    case ANY_TSTRING: return "string";
+    case ANY_TTABLE: return "table";
+    case ANY_TFUNCTION: return "function";
+    case ANY_TUSERDATA: return "userdata";
+    case ANY_TVECTOR: return "vector";
+    default: return "unknown";
+    }
+}
+
+bool IsSupportedRawLuaDBValue(const ScriptAnyType type)
+{
+    return type == ANY_TBOOLEAN || type == ANY_TNUMBER || type == ANY_TSTRING;
+}
+
+bool TraceLuaDBCallsEnabled()
+{
+    static const bool enabled = []()
+    {
+        const wchar_t* commandLine = GetCommandLineW();
+        return commandLine && std::wcsstr(commandLine, L"-kcd2dbTraceLuaDBCalls") != nullptr;
+    }();
+    return enabled;
+}
 }
 
 std::string substring(const std::string& input, const long long max_length = 100)
@@ -355,12 +390,14 @@ bool LuaDB::isRegistered() const
 void LuaDB::RegisterLuaAPI()
 {
     std::lock_guard lock(m_mutex);
+    const DWORD threadId = GetCurrentThreadId();
     if (m_registered)
     {
-        LogDebug("LuaDB is already registered.");
+        LogDebug("LuaDB is already registered on thread %lu.", threadId);
         return;
     }
 
+    LogDebug("RegisterLuaAPI started on thread %lu.", threadId);
     CScriptableBase::Init(gEnv->pScriptSystem, gEnv->pSystem);
     SetGlobalName("LuaDB");
 #undef SCRIPT_REG_CLASSNAME
@@ -394,10 +431,17 @@ void LuaDB::RegisterLuaAPI()
     SCRIPT_REG_TEMPLFUNC(Dump, "");
     LogDebug("Registered LuaDB method Dump");
 
-    m_pSS->ExecuteBuffer(db_lua, strlen(db_lua), "db.lua");
-    LogDebug("DB lua API loaded");
+    if (m_pSS->ExecuteBuffer(db_lua, strlen(db_lua), "db.lua"))
+    {
+        LogDebug("DB lua API loaded on thread %lu.", threadId);
+    }
+    else
+    {
+        LogError("DB lua API load failed on thread %lu.", threadId);
+    }
     gEnv->pGame->GetIGameFramework()->RegisterListener(this, "LuaDB", FRAMEWORKLISTENERPRIORITY_DEFAULT);
-    LogDebug("LuaDB registered as game framework listener");
+    LogDebug("LuaDB registered as game framework listener on thread %lu.", threadId);
+    LuaRunner::Instance().StartFromCommandLine();
     m_registered = true;
     LogInfo("LuaDB loading completed.");
 }
@@ -445,17 +489,61 @@ void LuaDB::SyncCacheWithDatabaseLocked()
 int LuaDB::GenericAccess(IFunctionHandler* pH, const AccessType action, const bool isGlobal)
 {
     constexpr auto ArgError = [](auto* handler) { return handler->EndFunction(false); };
+    constexpr auto ActionName = [](const AccessType action)
+    {
+        switch (action)
+        {
+        case AccessType::Set: return "Set";
+        case AccessType::Get: return "Get";
+        case AccessType::Del: return "Del";
+        case AccessType::Exi: return "Exi";
+        case AccessType::All: return "All";
+        default: return "Unknown";
+        }
+    };
+
     try
     {
         const char* key = nullptr;
         ScriptAnyValue value;
+        const char* funcName = pH->GetFuncName();
+        const DWORD threadId = GetCurrentThreadId();
 
         if ((action != AccessType::All && !pH->GetParam(1, key)) || (action == AccessType::Set && !pH->
             GetParamAny(2, value)))
         {
-            LogWarn("Invalid arguments");
+            LogWarn("LuaDB.%s invalid arguments on thread %lu: action=%s, scope=%s, key=%s, valueType=%s",
+                    funcName ? funcName : "<unknown>",
+                    threadId,
+                    ActionName(action),
+                    isGlobal ? "global" : "save",
+                    key ? key : "<missing>",
+                    action == AccessType::Set ? ScriptAnyTypeName(value.type) : "n/a");
             return ArgError(pH);
         }
+
+        if (action == AccessType::Set && !IsSupportedRawLuaDBValue(value.type))
+        {
+            LogWarn("LuaDB.%s unsupported value type on thread %lu: scope=%s, key=%s, valueType=%s",
+                    funcName ? funcName : "<unknown>",
+                    threadId,
+                    isGlobal ? "global" : "save",
+                    key ? key : "<missing>",
+                    ScriptAnyTypeName(value.type));
+            return pH->EndFunction(false);
+        }
+
+        if (TraceLuaDBCallsEnabled())
+        {
+            LogDebug("LuaDB.%s called on thread %lu: action=%s, scope=%s, key=%s, valueType=%s",
+                     funcName ? funcName : "<unknown>",
+                     threadId,
+                     ActionName(action),
+                     isGlobal ? "global" : "save",
+                     key ? key : "<all>",
+                     action == AccessType::Set ? ScriptAnyTypeName(value.type) : "n/a");
+        }
+
         std::lock_guard lock(m_mutex);
         auto& cache = isGlobal ? m_globalCache : m_saveCache;
 
@@ -513,18 +601,43 @@ int LuaDB::GenericAccess(IFunctionHandler* pH, const AccessType action, const bo
 
 void LuaDB::OnLoadGame(ILoadGame* pLoadGame)
 {
-    const std::string loadFileName = pLoadGame->GetFileName();
-    LogInfo("Load Game : %s", loadFileName.c_str());
-    // 记录当前本地缓存对应的存档文件名。
-    std::lock_guard lock(m_mutex);
-    m_saveCacheFileName = loadFileName;
-    SyncCacheWithDatabaseLocked();
+    try
+    {
+        const char* fileName = pLoadGame ? pLoadGame->GetFileName() : nullptr;
+        if (!fileName)
+        {
+            LogError("Load game listener received a null save file name on thread %lu.", GetCurrentThreadId());
+            return;
+        }
+
+        const std::string loadFileName = fileName;
+        LogInfo("Load Game on thread %lu: %s", GetCurrentThreadId(), loadFileName.c_str());
+        // 记录当前本地缓存对应的存档文件名。
+        std::lock_guard lock(m_mutex);
+        m_saveCacheFileName = loadFileName;
+        SyncCacheWithDatabaseLocked();
+    }
+    catch (const std::exception& e)
+    {
+        LogError("Load data failed on thread %lu: %s", GetCurrentThreadId(), e.what());
+    }
+    catch (...)
+    {
+        LogError("Load data failed on thread %lu: Unknown error", GetCurrentThreadId());
+    }
 }
 
 void LuaDB::OnSaveGame(ISaveGame* pSaveGame)
 {
-    const std::string newSave = pSaveGame->GetFileName();
-    LogInfo("Save Game : %s", newSave.c_str());
+    const char* fileName = pSaveGame ? pSaveGame->GetFileName() : nullptr;
+    if (!fileName)
+    {
+        LogError("Save game listener received a null save file name on thread %lu.", GetCurrentThreadId());
+        return;
+    }
+
+    const std::string newSave = fileName;
+    LogInfo("Save Game on thread %lu: %s", GetCurrentThreadId(), newSave.c_str());
     // 将当前缓存作为完整快照写入，避免同名存档复用时残留旧键。
     std::lock_guard lock(m_mutex);
     try
@@ -571,10 +684,13 @@ void LuaDB::OnPostUpdate(float /*fDeltaTime*/)
     using namespace std::chrono;
     constexpr seconds SAVE_INTERVAL{1}; // 1秒间隔
 
+    LuaRunner::Instance().ExecuteQueuedScripts(gEnv ? gEnv->pScriptSystem : nullptr);
+
     std::lock_guard lock(m_mutex);
     if (!m_globalDirty) return;
     if (const auto now = steady_clock::now(); now - m_lastSaveTime < SAVE_INTERVAL) return;
 
+    LogDebug("OnPostUpdate flushing global data on thread %lu.", GetCurrentThreadId());
     try
     {
         int successCount = 0;

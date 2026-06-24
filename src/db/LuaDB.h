@@ -32,10 +32,8 @@ public:
             m_value = v.str;
             break;
         default:
-            // Raw LuaDB has historically been permissive: unsupported direct values
-            // keep the default false value in release builds. Do not turn this into
-            // hard argument rejection without a support plan; use the DB JSON
-            // wrapper for tables and other structured Lua values.
+            // Unsupported raw LuaDB values should be rejected before constructing
+            // ScriptValue. Use the DB JSON wrapper for structured Lua values.
             assert(false);
         }
     }
@@ -49,7 +47,7 @@ public:
     Type type() const {
         return static_cast<Type>(m_value.index());
     }
-    //支持方法
+    // Lua 类型方法
     int anyType() const
     {
         switch (type())

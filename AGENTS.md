@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## 项目结构与模块组织
-仓库产出 `kcd2db.asi` 注入模块，顶层 `CMakeLists.txt` 管理依赖。`src/kcd2db.cpp` 负责查找 `gEnv` 并重定向 `IGame::CompleteInit`，`src/db` 提供 LuaDB 与 SQLiteCpp 的桥接逻辑，`src/log` 统一日志函数，`src/lua` 保存对游戏 Lua 可见的 API 包装。`external/cryengine` 是最小 CryEngine 头文件镜像，仅提供编译期类型声明。当前仓库没有提交 `tests/`、`docs/` 或 `openspec/` 目录；若新增，请同步更新本文档和 README。构建产物写入 `build/` 或 IDE 生成目录，请避免提交生成文件。
+仓库产出 `kcd2db.asi` 注入模块，顶层 `CMakeLists.txt` 管理依赖。`src/kcd2db.cpp` 负责查找 `gEnv` 并重定向 `IGame::CompleteInit`，`src/db` 提供 LuaDB 与 SQLiteCpp 的桥接逻辑，`src/log` 统一日志函数，`src/lua` 保存对游戏 Lua 可见的 API 包装。`dist/` 保存可直接随 Mod 分发的 Lua fake DB 脚本，`docs/` 保存面向 Mod 作者的补充文档。`external/cryengine` 是最小 CryEngine 头文件镜像，仅提供编译期类型声明。当前仓库没有提交 `tests/` 或 `openspec/` 目录；若新增，请同步更新本文档和 README。构建产物写入 `build/` 或 IDE 生成目录，请避免提交生成文件。
 
 ## 关键实现边界
 这是《天国拯救2》的 Windows x64 ASI 插件，CMake 会强制要求 Windows + MSVC。`src/kcd2db.cpp` 通过签名扫描定位 `gEnv`，修改 `IGame::CompleteInit` 虚表入口并注册 Lua API；任何改动都必须考虑游戏版本更新导致的指令上下文变化。触碰游戏 Lua 或 framework 状态的操作必须保持在游戏初始化线程上执行，Lua API 注册路径以 `CompleteInit` hook 为准；`main_thread` 只负责等待模块、定位 `gEnv`、安装 hook 和构造 `LuaDB`。`src/db/LuaDB.*` 维护 `m_saveCache` 与 `m_globalCache`：存档关联数据在 `OnSaveGame` 写入，全局数据由 `OnPostUpdate` 脏标记定时写入。`src/lua/db.h` 的 `DB` 包装层负责命名空间隔离与 JSON 编解码；底层 `LuaDB` 只直接处理 bool、float 和 string。
@@ -32,7 +32,7 @@
 按照历史记录（如 `Refactor: 使用 std::bit_cast 替代 static_cast 进行虚表函数指针转换`、`Fix #1 Lua crash in multithreaded execution`）保持简短祈使句式，首字母大写，必要时引用 issue 编号或模块前缀。单个提交聚焦一个主题并包含相关验证。PR 描述需概述动机、方案与验证步骤；若修改影响游戏内接口，附加 Lua 片段示例能加速评审。
 
 ## 版本发布与 Release Notes
-当用户要求 agent 创建或推送发布 tag（例如 `v0.1.13`）时，不要只依赖 GitHub 自动生成的 release notes。发布前必须主动收集上一个 GitHub Release/tag 到目标版本的提交、变更文件和相关 issue/PR 信息，并由 agent 编写面向用户的 release notes。内容应突出玩家或 Mod 使用者需要知道的支持性、崩溃修复、存档/数据风险、安装变化和调试信息；内部重构、workflow、文档、第三方头文件整理等与用户无关的变化应简要带过或省略。生成 notes 后先展示给用户确认，未经确认不要推送 tag 或触发发布。
+当用户要求 agent 创建或推送发布 tag（例如 `v0.1.13`）时，不要只依赖 GitHub 自动生成的 release notes。发布前必须主动收集上一个 GitHub Release/tag 到目标版本的提交、变更文件和相关 issue/PR 信息，并由 agent 编写面向用户的 release notes。内容应突出玩家或 Mod 使用者需要知道的游戏版本适配、崩溃修复、存档/数据风险、安装变化和调试信息；内部重构、workflow、文档、第三方头文件整理等与用户无关的变化应简要带过或省略。生成 notes 后先展示给用户确认，未经确认不要推送 tag 或触发发布。
 
 确认发布后，按现有 tag workflow 推送 tag。等待 GitHub Actions 创建/更新 Release 与上传资产后，用用户确认过的正文更新 GitHub Release，例如 `gh release edit <tag> --notes-file <notes.md>`。如果发布同时准备同步到 Nexus Mods，应基于同一份用户确认过的变更摘要再压缩成 Nexus 页面适合的简短说明，并再次确认是否上传。
 

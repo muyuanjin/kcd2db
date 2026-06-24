@@ -30,6 +30,8 @@ You can now store any Lua object encodable by [json.lua](https://github.com/rxi/
 Strings in objects are no longer limited by character sets.
 
 ```lua
+Script.ReloadScript("scripts/<modid>/kcd2db_fake_db.lua")
+
 local myDB = DB.Create("MyAwesomeMod")  -- Use your Mod name or a unique enough string that won't conflict as the namespace
 myDB.Set("player_health", 85.6)
 myDB:Set("has_dragon_sword", true) -- myDB allows both .call and :call syntax
@@ -55,13 +57,14 @@ local settings = myDB.GetG("settings") -- return table {volume = 0.8, fullscreen
 ```
 ## Sample
 ```lua
+Script.ReloadScript("scripts/yourmod/kcd2db_fake_db.lua")
+
 YourMod = YourMod or (function()
--- Make LuaDB an enhancement for mods, allowing users to opt for LuaDB to achieve persistence.
-local db = LuaDB and DB and select(2, pcall(DB.Create,"YourMod"))
+local db = DB.Create("YourMod")
 return {
 version = "__VERSION__",
-localData = db and db.L or {},
-globalData = db and db.G or {}
+localData = db.L,
+globalData = db.G
 }
 end)()
 
@@ -89,6 +92,19 @@ end
 
 YourMod:Init()
 ```
+
+## Optional Fake DB
+
+Mod authors can ship `dist/kcd2db_fake_db.lua` inside their own PAK and load it as the first line of the mod entry script:
+
+```lua
+Script.ReloadScript("scripts/<modid>/kcd2db_fake_db.lua")
+local db = DB.Create("MyMod")
+```
+
+Use a mod-specific path such as `scripts/<modid>/kcd2db_fake_db.lua` to avoid PAK path conflicts between mods. With `kcd2db.asi` installed, the wrapper uses the real persistent backend. Without `kcd2db.asi`, it provides a session-only fake backend so the mod can keep running, but data is memory-only, not saved to disk, and not isolated by save switch.
+
+See [docs/fake-db.md](docs/fake-db.md) for packaging details and backend status fields.
 
 # DB API Documentation
 
@@ -169,7 +185,9 @@ LuaDB.Dump()
 - Raw `LuaDB` values are limited to booleans, numbers, and strings because the C++ layer stores `ScriptValue` as `bool`, `float`, or `std::string`.
 - Raw numbers are stored as single-precision floats. Raw booleans are stored as `0`/`1`. Strings are stored as SQLite `TEXT`.
 
-## Usage Examples
+## Raw LuaDB Examples
+
+Most mods should load `kcd2db_fake_db.lua` and use `DB.Create`. Use raw `LuaDB` calls only for low-level boolean, number, or string storage.
 
 ```lua
 -- Save-associated data example
@@ -197,6 +215,9 @@ When building from WSL, make sure `cmake` resolves to the Windows CMake/MSVC too
 - Operation logs stored in `kcd2db.log` in game root
 - If launched with `-console`, `INFO`, `WARN`, and `ERROR` logs also appear in the console by default with a `[kcd2db]` prefix. `DEBUG` logs remain in `kcd2db.log`.
 - Use `-kcd2dbConsoleLog=debug|info|warn|error|off` to change console log verbosity.
+- The Lua runner is disabled by default. Launch the game with `-kcd2dbLuaRunner` to accept script paths from supported VS Code Lua runner extensions on `127.0.0.1:28771`. Use `-kcd2dbLuaRunner=<port>` to override the port.
+- The runner executes queued scripts on the game update thread and reads UTF-8 Windows paths directly before passing script buffers to CryEngine.
+- Existing clients can keep using the existing 4-byte little-endian length-prefixed comma-separated path payload. Native clients can send a length-prefixed UTF-8 payload beginning with `KCD2DB_LUA_RUNNER/1`, followed by `command=run`, optional `mode=auto|buffer|file`, and one `path=<absolute path>` line per script. `command=ping` returns `pong`.
 - `kcd2db.log` may include local paths and command-line arguments; redact them before sharing logs if needed.
 
 ## Important Notes
@@ -235,6 +256,8 @@ after game updates, try removing the mod file (or rename `.asi` extension to dis
 你现在可以存储任何可以通过[json.lua](https://github.com/rxi/json.lua)编码的Lua对象了！，包括table，string，number，boolean等等，对象中的字符串也不再有字符集限制  
 
 ```lua
+Script.ReloadScript("scripts/<modid>/kcd2db_fake_db.lua")
+
 local myDB = DB.Create("MyAwesomeMod")  -- 使用你的 Mod 名或者一个足够独特不会冲突的字符串作为命名空间
 myDB.Set("player_health", 85.6)
 myDB:Set("has_dragon_sword", true)  -- myDB 允许.调用 和 :调用 语法
@@ -261,13 +284,14 @@ local settings = myDB.GetG("settings") -- return table {volume = 0.8, fullscreen
 
 ## 示例
 ```lua
+Script.ReloadScript("scripts/yourmod/kcd2db_fake_db.lua")
+
 YourMod = YourMod or (function()
--- 使 LuaDB 成为MOD的增强功能，使用户可以选择 LuaDB 实现持久性。
-local db = LuaDB and DB and select(2, pcall(DB.Create,"YourMod"))
+local db = DB.Create("YourMod")
 return {
 version = "__VERSION__",
-localData = db and db.L or {},
-globalData = db and db.G or {}
+localData = db.L,
+globalData = db.G
 }
 end)()
 
@@ -295,6 +319,19 @@ end
 
 YourMod:Init()
 ```
+
+## 可选 Fake DB
+
+Mod 作者可以把 `dist/kcd2db_fake_db.lua` 放进自己的 PAK，并在入口脚本第一行加载：
+
+```lua
+Script.ReloadScript("scripts/<modid>/kcd2db_fake_db.lua")
+local db = DB.Create("MyMod")
+```
+
+建议使用 `scripts/<modid>/kcd2db_fake_db.lua` 这类独立路径，避免多个 Mod 在合并 PAK 时覆盖同一个脚本路径。安装了 `kcd2db.asi` 时，fake DB 文件会保留真实持久化后端；未安装时，会提供仅当前 Lua session 有效的 fake 后端，让 Mod 继续运行，但数据只保存在内存中，不会写入磁盘，也不按存档切换隔离。
+
+打包方式和后端状态字段见 [docs/fake-db.md](docs/fake-db.md)。
 
 # DB API 文档
 
@@ -376,7 +413,9 @@ LuaDB.Dump()
 - 原始 `LuaDB` 值仅支持布尔值、数字和字符串，因为 C++ 层的 `ScriptValue` 只保存 `bool`、`float` 或 `std::string`。
 - 原始数字以单精度浮点存储，布尔值以 `0`/`1` 存储，字符串以 SQLite `TEXT` 存储。
 
-## 使用示例
+## Raw LuaDB 示例
+
+大多数 Mod 应加载 `kcd2db_fake_db.lua` 并使用 `DB.Create`。仅在需要底层布尔值、数字或字符串存储时直接调用 raw `LuaDB`。
 
 ```lua
 -- 存档关联数据示例
@@ -404,6 +443,9 @@ LuaDB.Dump()
 - 操作日志存储在游戏根目录下的 `kcd2db.log` 文件中
 - 如果使用 `-console` 参数启动，默认只在控制台显示 `INFO`、`WARN` 和 `ERROR` 日志，并带有 `[kcd2db]` 前缀。`DEBUG` 日志仍会写入 `kcd2db.log`。
 - 使用 `-kcd2dbConsoleLog=debug|info|warn|error|off` 调整控制台日志详细程度。
+- Lua runner 默认关闭。使用 `-kcd2dbLuaRunner` 启动游戏后，可在 `127.0.0.1:28771` 接收 VS Code Lua runner 扩展发送的脚本路径；如需避让端口，可使用 `-kcd2dbLuaRunner=<port>`。
+- runner 会在游戏 update 线程执行队列中的脚本，并优先按 UTF-8 Windows 路径读取文件内容后交给 CryEngine 执行。
+- 旧客户端可继续使用现有的 4 字节 little-endian 长度前缀逗号分隔路径 payload。原生客户端可发送带长度前缀的 UTF-8 payload：首行为 `KCD2DB_LUA_RUNNER/1`，随后写入 `command=run`、可选 `mode=auto|buffer|file`，以及每个脚本一行 `path=<absolute path>`。`command=ping` 会返回 `pong`。
 - `kcd2db.log` 可能包含本机路径和命令行参数；如需分享日志，可先自行打码。
 
 ## 注意事项
