@@ -20,8 +20,11 @@
 #include "db/LuaDB.h"
 #include <cryengine/env.h>
 #include <cryengine/IGame.h>
+#include "hooks/CursorHook.h"
 #include "log/log.h"
 #include "lua/LuaRunner.h"
+#include "util/ModuleUtils.h"
+#include "util/StringUtils.h"
 
 #ifndef KCD2DB_VERSION
 #define KCD2DB_VERSION "dev"
@@ -66,25 +69,6 @@ constexpr const char* get_target_arch()
 #endif
 }
 
-std::string wide_to_utf8(const wchar_t* value)
-{
-    if (!value || value[0] == L'\0')
-    {
-        return {};
-    }
-
-    const int size = WideCharToMultiByte(CP_UTF8, 0, value, -1, nullptr, 0, nullptr, nullptr);
-    if (size <= 1)
-    {
-        return {};
-    }
-
-    std::string result(size, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, value, -1, result.data(), size, nullptr, nullptr);
-    result.resize(size - 1);
-    return result;
-}
-
 std::string get_module_path(HMODULE module)
 {
     std::wstring buffer(MAX_PATH, L'\0');
@@ -99,7 +83,7 @@ std::string get_module_path(HMODULE module)
         if (size < buffer.size() - 1)
         {
             buffer.resize(size);
-            return wide_to_utf8(buffer.c_str());
+            return kcd2db::WideToUtf8(buffer.c_str());
         }
         buffer.resize(buffer.size() * 2);
     }
@@ -120,7 +104,7 @@ std::string get_current_directory_path()
         return "<unknown>";
     }
     buffer.resize(size);
-    return wide_to_utf8(buffer.c_str());
+    return kcd2db::WideToUtf8(buffer.c_str());
 }
 
 std::string make_expected_db_path()
@@ -140,39 +124,9 @@ std::string make_expected_db_path()
     return cwd;
 }
 
-std::string to_lower_ascii(std::string_view value)
-{
-    std::string result;
-    result.reserve(value.size());
-    for (const unsigned char ch : value)
-    {
-        result.push_back(static_cast<char>(std::tolower(ch)));
-    }
-    return result;
-}
-
-bool equals_ignore_case_ascii(std::string_view lhs, std::string_view rhs)
-{
-    if (lhs.size() != rhs.size())
-    {
-        return false;
-    }
-
-    for (size_t i = 0; i < lhs.size(); ++i)
-    {
-        const auto left = static_cast<unsigned char>(lhs[i]);
-        const auto right = static_cast<unsigned char>(rhs[i]);
-        if (std::tolower(left) != std::tolower(right))
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
 bool contains_diagnostic_token(const lm_module_t& module)
 {
-    const std::string text = to_lower_ascii(std::string(module.name) + " " + module.path);
+    const std::string text = kcd2db::ToLowerAscii(std::string(module.name) + " " + module.path);
     constexpr std::array tokens = {"whgame", "kingdom", "cry", "game"};
     return std::any_of(tokens.begin(), tokens.end(), [&](const char* token)
     {
@@ -211,46 +165,9 @@ struct ModuleDiagnosticState
     bool enumFailureLogged = false;
 };
 
-struct ModuleNameSearch
-{
-    std::string_view expectedName;
-    lm_module_t* result = nullptr;
-    bool found = false;
-};
-
-lm_bool_t LM_CALL find_module_by_name_case_insensitive(lm_module_t* module, lm_void_t* arg)
-{
-    auto* search = static_cast<ModuleNameSearch*>(arg);
-    if (!module || search->found)
-    {
-        return LM_TRUE;
-    }
-
-    if (equals_ignore_case_ascii(module->name, search->expectedName))
-    {
-        *search->result = *module;
-        search->found = true;
-    }
-    return LM_TRUE;
-}
-
 bool find_target_module(lm_module_t& module)
 {
-    if (LM_FindModule(kClientDll, &module))
-    {
-        return true;
-    }
-
-    ModuleNameSearch search{
-        .expectedName = kClientDll,
-        .result = &module,
-        .found = false,
-    };
-    if (LM_EnumModules(find_module_by_name_case_insensitive, &search) != LM_TRUE)
-    {
-        return false;
-    }
-    return search.found;
+    return kcd2db::FindModuleByName(kClientDll, module);
 }
 
 lm_bool_t LM_CALL collect_module_diagnostics(lm_module_t* module, lm_void_t* arg)
@@ -261,7 +178,7 @@ lm_bool_t LM_CALL collect_module_diagnostics(lm_module_t* module, lm_void_t* arg
         return LM_TRUE;
     }
 
-    const std::string key = to_lower_ascii(std::string(module->name) + "\n" + module->path);
+    const std::string key = kcd2db::ToLowerAscii(std::string(module->name) + "\n" + module->path);
     if (diagnostics->seenModules && !diagnostics->seenModules->insert(key).second)
     {
         return LM_TRUE;
@@ -334,7 +251,7 @@ void log_startup_diagnostics(HMODULE selfModule)
     LogDebug("Process exe path: %s", get_module_path(nullptr).c_str());
     LogDebug("Current working directory: %s", get_current_directory_path().c_str());
     LogDebug("Expected DB path: %s", make_expected_db_path().c_str());
-    LogDebug("Command line: %s", wide_to_utf8(GetCommandLineW()).c_str());
+    LogDebug("Command line: %s", kcd2db::WideToUtf8(GetCommandLineW()).c_str());
 }
 
 void log_scan_module_error(const char* message, const lm_module_t& module)
@@ -631,6 +548,8 @@ void start()
         gLuaDB.store(luaDB, std::memory_order_release);
         LogDebug("LuaDB initialized");
 
+        CursorHook::Install(reinterpret_cast<std::uintptr_t>(env_ptr));
+
         while (env_ptr->pGame->GetIGameFramework() == nullptr
             || !env_ptr->pGame->GetIGameFramework()->IsGameStarted())
         {
@@ -709,6 +628,7 @@ BOOL APIENTRY DllMain(const HMODULE hModule, const DWORD reason, LPVOID lpReserv
         // so it does not point at unloaded code; avoid game-owned objects during process teardown.
         if (lpReserved == nullptr)
         {
+            CursorHook::Restore();
             RestoreCompleteInitHook();
         }
         Log_close();

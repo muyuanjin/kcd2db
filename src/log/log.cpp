@@ -14,30 +14,13 @@
 #include <vector>
 #include <windows.h>
 
+#include "../util/StringUtils.h"
+
 auto Filename = "kcd2db.log";
 HANDLE ConsoleHandle = nullptr;
 
 namespace
 {
-std::string WideToUtf8(const wchar_t* value)
-{
-    if (!value || value[0] == L'\0')
-    {
-        return {};
-    }
-
-    const int size = WideCharToMultiByte(CP_UTF8, 0, value, -1, nullptr, 0, nullptr, nullptr);
-    if (size <= 1)
-    {
-        return {};
-    }
-
-    std::string result(size, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, value, -1, result.data(), size, nullptr, nullptr);
-    result.resize(size - 1);
-    return result;
-}
-
 std::string GetFullPath(const wchar_t* path)
 {
     const DWORD required = GetFullPathNameW(path, 0, nullptr, nullptr);
@@ -54,7 +37,7 @@ std::string GetFullPath(const wchar_t* path)
     }
 
     buffer.resize(size);
-    return WideToUtf8(buffer.c_str());
+    return kcd2db::WideToUtf8(buffer.c_str());
 }
 }
 

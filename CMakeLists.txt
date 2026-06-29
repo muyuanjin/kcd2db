@@ -40,7 +40,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(SQLiteCpp)
 
 set(CRYENGINE_SDK_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/cryengine/include")
-file(GLOB_RECURSE CRYENGINE_SDK_HEADERS
+file(GLOB_RECURSE CRYENGINE_SDK_HEADERS CONFIGURE_DEPENDS
         "${CRYENGINE_SDK_INCLUDE_DIR}/cryengine/*.h"
 )
 add_library(cryengine_sdk INTERFACE)
@@ -52,7 +52,7 @@ if (CRYENGINE_SDK_HEADERS)
     )
 endif ()
 
-file(GLOB_RECURSE KCD2DB_SOURCES
+file(GLOB_RECURSE KCD2DB_SOURCES CONFIGURE_DEPENDS
         "src/*.cpp"
         "src/*.h"
 )
