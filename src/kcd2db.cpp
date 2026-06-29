@@ -544,6 +544,7 @@ void start()
 
         LogDebug("Hooked CompleteInit function");
         LogInfo("Using LuaDB database at: %s", make_expected_db_path().c_str());
+        CursorHook::PrepareInstall();
         const auto luaDB = new LuaDB();
         gLuaDB.store(luaDB, std::memory_order_release);
         LogDebug("LuaDB initialized");

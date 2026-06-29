@@ -204,7 +204,17 @@ local function make_fake_luadb()
             return all_values(global_store)
         end,
 
-        Dump = dump_values
+        Dump = dump_values,
+
+        CursorDeclare = function()
+            return false
+        end,
+        CursorLock = function()
+            return false
+        end,
+        CursorUnlock = function()
+            return false
+        end
     }
 end
 
@@ -785,6 +795,70 @@ meta.persistent = using_native and (_G.LuaDB.__kcd2db_persistent ~= false) or fa
 meta.backend = using_native and (_G.LuaDB.__kcd2db_backend or "native-supported") or "memory"
 meta.version = KCD2DB_FAKE_DB_VERSION
 meta.fake_db_loaded = KCD2DB_FAKE_DB_VERSION
+
+local function has_cursor_wrapper()
+    return type(meta.Cursor) == "table"
+        and type(meta.Cursor.Declare) == "function"
+        and type(meta.Cursor.Lock) == "function"
+        and type(meta.Cursor.Unlock) == "function"
+end
+
+local function has_native_cursor_api(name)
+    return type(_G.LuaDB) == "table" and type(_G.LuaDB[name]) == "function"
+end
+
+local function install_cursor_api()
+    local cursor = meta.Cursor
+    if type(cursor) ~= "table" then
+        if cursor ~= nil then
+            record_conflict("Cursor", cursor)
+            log("WARN", "Replaced non-table KCD2DB.Cursor value.")
+        end
+        cursor = {}
+    end
+
+    if type(meta.conflicts.Cursor_fields) ~= "table" then
+        meta.conflicts.Cursor_fields = {}
+    end
+
+    local function set_cursor_field(name, value)
+        if cursor[name] ~= nil then
+            meta.conflicts.Cursor_fields[name] = cursor[name]
+            log("WARN", "Overwrote existing KCD2DB.Cursor." .. tostring(name) .. " field.")
+        end
+        cursor[name] = value
+    end
+
+    local function declareImpl(path)
+        if has_native_cursor_api("CursorDeclare") then
+            return _G.LuaDB.CursorDeclare(path)
+        end
+        return false
+    end
+
+    local function lockImpl(path)
+        if has_native_cursor_api("CursorLock") then
+            return _G.LuaDB.CursorLock(path)
+        end
+        return false
+    end
+
+    local function unlockImpl()
+        if has_native_cursor_api("CursorUnlock") then
+            return _G.LuaDB.CursorUnlock()
+        end
+        return false
+    end
+
+    set_cursor_field("Declare", wrap(declareImpl, 1, cursor))
+    set_cursor_field("Lock", wrap(lockImpl, 1, cursor))
+    set_cursor_field("Unlock", wrap(unlockImpl, 0, cursor))
+    meta.Cursor = cursor
+end
+
+if not has_cursor_wrapper() then
+    install_cursor_api()
+end
 
 if not already_loaded or installed_fake or needs_db_wrapper then
     if using_native then

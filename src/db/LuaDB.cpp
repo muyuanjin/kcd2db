@@ -12,6 +12,7 @@
 #include <unordered_set>
 #include <string>
 #include <windows.h>
+#include "../hooks/CursorHook.h"
 #include "../lua/db.h"
 #include "../lua/LuaRunner.h"
 #include "../util/StringUtils.h"
@@ -412,6 +413,12 @@ void LuaDB::RegisterLuaAPI()
     // 工具方法
     SCRIPT_REG_TEMPLFUNC(Dump, "");
     LogDebug("Registered LuaDB method Dump");
+    SCRIPT_REG_TEMPLFUNC(CursorDeclare, "path");
+    LogDebug("Registered LuaDB method CursorDeclare");
+    SCRIPT_REG_TEMPLFUNC(CursorLock, "path");
+    LogDebug("Registered LuaDB method CursorLock");
+    SCRIPT_REG_TEMPLFUNC(CursorUnlock, "");
+    LogDebug("Registered LuaDB method CursorUnlock");
 
     if (m_pSS->ExecuteBuffer(db_lua, strlen(db_lua), "db.lua"))
     {
@@ -579,6 +586,35 @@ int LuaDB::GenericAccess(IFunctionHandler* pH, const AccessType action, const bo
         LogError("LuaDB: Unknown exception in GenericAccess");
     }
     return ArgError(pH);
+}
+
+int LuaDB::CursorDeclare(IFunctionHandler* pH)
+{
+    const char* path = nullptr;
+    if (!pH->GetParam(1, path) || !path || path[0] == '\0')
+    {
+        LogWarn("LuaDB.CursorDeclare invalid cursor path.");
+        return pH->EndFunction(false);
+    }
+
+    return pH->EndFunction(CursorHook::DeclareCursorPath(path));
+}
+
+int LuaDB::CursorLock(IFunctionHandler* pH)
+{
+    const char* path = nullptr;
+    if (!pH->GetParam(1, path) || !path || path[0] == '\0')
+    {
+        LogWarn("LuaDB.CursorLock invalid cursor path.");
+        return pH->EndFunction(false);
+    }
+
+    return pH->EndFunction(CursorHook::LockCursorPath(path));
+}
+
+int LuaDB::CursorUnlock(IFunctionHandler* pH)
+{
+    return pH->EndFunction(CursorHook::UnlockCursorPath());
 }
 
 void LuaDB::OnLoadGame(ILoadGame* pLoadGame)

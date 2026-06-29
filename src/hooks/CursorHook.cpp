@@ -8,11 +8,8 @@
 #include <atomic>
 #include <bit>
 #include <cctype>
-#include <cstdio>
 #include <cstring>
-#include <cwchar>
 #include <deque>
-#include <intrin.h>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -20,7 +17,6 @@
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
-#include <vector>
 
 #include <libmem/libmem.h>
 
@@ -39,10 +35,7 @@ constexpr std::uintptr_t kHardwareMouseOffset = 0x100;
 constexpr std::uintptr_t kEnvScanStartOffset = 0x80;
 constexpr std::uintptr_t kEnvScanEndOffset = 0x180;
 constexpr int kSetCursorPathIndex = 18;
-constexpr std::wstring_view kDiagnosticFlag = L"-kcd2dbCursorHook";
-constexpr std::wstring_view kLockFlag = L"-kcd2dbCursorLock";
-constexpr std::wstring_view kTraceFlag = L"-kcd2dbCursorTrace";
-constexpr std::wstring_view kPrefixFlag = L"-kcd2dbCursorPrefix";
+constexpr std::wstring_view kHookFlag = L"-kcd2dbCursorHook";
 constexpr const char* kClientDll = "WHGame.DLL";
 constexpr const char* kCursorCVarName = "r_MouseCursorTexture";
 constexpr std::size_t kMaxSetCursorDetourPatchSize = 32;
@@ -72,6 +65,15 @@ using CVarSetStringFunc = void(__thiscall*)(ICVar*, const char*);
 using CryStringAssignFunc = void*(__fastcall*)(void*, const char*);
 using LoadTextureFunc = void*(__fastcall*)(void*, const char*, unsigned int);
 
+enum class InstallState
+{
+    Disabled,
+    Pending,
+    Installed,
+    Failed,
+};
+
+std::atomic<InstallState> gInstallState{InstallState::Disabled};
 std::atomic<void*> gSetCursorDetourTarget{nullptr};
 std::atomic<void**> gHookedCursorCVarSetSlot{nullptr};
 std::atomic<ICVar*> gCursorCVar{nullptr};
@@ -103,14 +105,16 @@ struct TextureCacheBindings
 
 struct State
 {
-    bool lockEnabled = false;
-    bool traceEnabled = false;
-    std::vector<std::string> allowedPrefixes;
     std::string lastAllowedPath;
     const char* lastAllowedStablePath = nullptr;
+    const char* lockedStablePath = nullptr;
+    std::string lockedNormalizedPath;
     std::deque<std::string> stablePaths;
     std::unordered_map<std::string, const char*> stablePathByValue;
+    std::unordered_map<std::string, const char*> declaredPathByNormalizedValue;
     bool loggedFirstAllowedPath = false;
+    bool loggedFirstDeclaredPath = false;
+    bool loggedFirstLockedPath = false;
     unsigned long long observedSetCursorCount = 0;
     unsigned long long blockedSetCursorCount = 0;
     unsigned long long observedCVarCount = 0;
@@ -124,6 +128,7 @@ std::mutex gTextureCacheMutex;
 State gState;
 std::unordered_map<std::string, void*> gTextureCache;
 bool gConsoleSinkInstalled = false;
+std::atomic<void*> gHardwareMouse{nullptr};
 thread_local bool gInsideCursorCVarSetHook = false;
 
 bool HasCommandLineFlag(std::wstring_view flag)
@@ -182,93 +187,19 @@ std::string NormalizePath(std::string_view path)
     return result;
 }
 
-std::vector<std::string> GetDefaultAllowedPrefixes()
-{
-    return {
-        "data/textures/cursor",
-        "data/textures/cursormouse",
-        "data/textures/cursorhand",
-        "data/textures/cursordagger",
-    };
-}
-
-void AddAllowedPrefix(std::vector<std::string>& prefixes, const wchar_t* value)
-{
-    std::string prefix = NormalizePath(kcd2db::WideToUtf8(value));
-    if (prefix.empty())
-    {
-        LogWarn("CursorHook ignored an empty -kcd2dbCursorPrefix value.");
-        return;
-    }
-
-    if (std::ranges::find(prefixes, prefix) == prefixes.end())
-    {
-        prefixes.push_back(std::move(prefix));
-    }
-}
-
-std::vector<std::string> GetAllowedPrefixesFromCommandLine()
-{
-    std::vector<std::string> prefixes = GetDefaultAllowedPrefixes();
-
-    int argc = 0;
-    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    if (!argv)
-    {
-        return prefixes;
-    }
-
-    const std::wstring prefixFlag(kPrefixFlag);
-    const std::wstring prefixWithEquals = prefixFlag + L"=";
-
-    for (int i = 1; i < argc; ++i)
-    {
-        if (_wcsicmp(argv[i], prefixFlag.c_str()) == 0)
-        {
-            if (i + 1 < argc && argv[i + 1][0] != L'-')
-            {
-                AddAllowedPrefix(prefixes, argv[++i]);
-            }
-            else
-            {
-                LogWarn("CursorHook ignored -kcd2dbCursorPrefix without a value.");
-            }
-            continue;
-        }
-
-        if (_wcsnicmp(argv[i], prefixWithEquals.c_str(), prefixWithEquals.size()) == 0)
-        {
-            AddAllowedPrefix(prefixes, argv[i] + prefixWithEquals.size());
-        }
-    }
-
-    LocalFree(argv);
-    return prefixes;
-}
-
 bool StartsWith(std::string_view value, std::string_view prefix)
 {
     return value.size() >= prefix.size() && value.substr(0, prefix.size()) == prefix;
 }
 
-bool StartsWithPathPrefix(std::string_view value, std::string_view prefix)
+bool HasDefaultAllowedPrefix(const std::string& normalizedPath)
 {
-    while (!prefix.empty() && prefix.back() == '/')
-    {
-        prefix.remove_suffix(1);
-    }
-
-    return value.size() >= prefix.size()
-        && value.substr(0, prefix.size()) == prefix
-        && (value.size() == prefix.size() || value[prefix.size()] == '/');
+    return StartsWith(normalizedPath, "data/textures/cursor");
 }
 
-bool IsAllowedPath(const std::string& normalizedPath)
+bool IsAllowedPathLocked(const std::string& normalizedPath)
 {
-    return std::ranges::any_of(gState.allowedPrefixes, [&](const std::string& prefix)
-    {
-        return StartsWithPathPrefix(normalizedPath, prefix);
-    });
+    return HasDefaultAllowedPrefix(normalizedPath) || gState.declaredPathByNormalizedValue.contains(normalizedPath);
 }
 
 bool IsEngineFallbackPath(const std::string& normalizedPath)
@@ -307,59 +238,21 @@ const char* RememberAllowedPathLocked(std::string_view path, const char* source)
     return stablePath;
 }
 
-bool ShouldLogSample(unsigned long long count)
+const char* DeclareCursorPathLocked(std::string_view path, const std::string& normalizedPath, const char* source)
 {
-    return count <= 40 || count % 120 == 0;
+    const char* stablePath = InternPathLocked(path);
+    gState.declaredPathByNormalizedValue[normalizedPath] = stablePath;
+    if (!gState.loggedFirstDeclaredPath)
+    {
+        gState.loggedFirstDeclaredPath = true;
+        LogDebug("CursorHook declared first cursor path via %s: %s", source, stablePath);
+    }
+    return stablePath;
 }
 
-std::string FormatAddress(void* address)
+const char* GetEffectiveFallbackPathLocked()
 {
-    if (!address)
-    {
-        return "0x0";
-    }
-
-    HMODULE module = nullptr;
-    if (GetModuleHandleExW(
-            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-            reinterpret_cast<LPCWSTR>(address),
-            &module) && module)
-    {
-        wchar_t modulePath[MAX_PATH]{};
-        const DWORD length = GetModuleFileNameW(module, modulePath, MAX_PATH);
-        std::wstring_view moduleName = length > 0 ? std::wstring_view(modulePath, length) : std::wstring_view(L"<module>");
-        const size_t slash = moduleName.find_last_of(L"\\/");
-        if (slash != std::wstring_view::npos)
-        {
-            moduleName.remove_prefix(slash + 1);
-        }
-
-        char buffer[256]{};
-        const std::string moduleNameUtf8 = kcd2db::WideToUtf8(std::wstring(moduleName).c_str());
-        std::snprintf(
-            buffer,
-            sizeof(buffer),
-            "%s+0x%llX",
-            moduleNameUtf8.c_str(),
-            static_cast<unsigned long long>(
-                reinterpret_cast<std::uintptr_t>(address) - reinterpret_cast<std::uintptr_t>(module)));
-        return buffer;
-    }
-
-    char buffer[64]{};
-    std::snprintf(buffer, sizeof(buffer), "0x%llX", reinterpret_cast<unsigned long long>(address));
-    return buffer;
-}
-
-const char* GetCursorCVarString()
-{
-    if (!gEnv.pConsole)
-    {
-        return nullptr;
-    }
-
-    ICVar* cvar = gEnv.pConsole->GetCVar(kCursorCVarName);
-    return cvar ? cvar->GetString() : nullptr;
+    return gState.lockedStablePath ? gState.lockedStablePath : gState.lastAllowedStablePath;
 }
 
 bool IsExecutableAddress(void* address)
@@ -404,6 +297,23 @@ void* ReadPointer(std::uintptr_t address)
 void* ReadObjectPointer(void* object, std::ptrdiff_t offset)
 {
     return ReadPointer(reinterpret_cast<std::uintptr_t>(object) + offset);
+}
+
+float ReadObjectFloat(void* object, std::ptrdiff_t offset, float fallback)
+{
+    if (!object)
+    {
+        return fallback;
+    }
+
+    __try
+    {
+        return *reinterpret_cast<float*>(static_cast<unsigned char*>(object) + offset);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return fallback;
+    }
 }
 
 bool ReadProcessBytes(std::uintptr_t address, void* buffer, std::size_t size)
@@ -691,7 +601,7 @@ LoadTextureFunc GetLoadTextureFunc(void* textureSystem)
     return std::bit_cast<LoadTextureFunc>(loadTexture);
 }
 
-void* LoadCursorTextureCached(const char* path, const std::string& normalizedPath, bool traceEnabled)
+void* LoadCursorTextureCached(const char* path, const std::string& normalizedPath)
 {
     if (!path || !path[0])
     {
@@ -719,7 +629,7 @@ void* LoadCursorTextureCached(const char* path, const std::string& normalizedPat
         std::lock_guard lock(gStateMutex);
         ++gState.textureLoadFailureCount;
         const unsigned long long failureCount = gState.textureLoadFailureCount;
-        if (failureCount == 1 || (traceEnabled && ShouldLogSample(failureCount)))
+        if (failureCount == 1)
         {
             LogWarn("CursorHook texture cache could not load cursor texture path=%s count=%llu.",
                     path,
@@ -737,12 +647,6 @@ void* LoadCursorTextureCached(const char* path, const std::string& normalizedPat
         }
     }
 
-    if (traceEnabled)
-    {
-        LogDebug("CursorHook cached cursor texture path=%s texture=0x%llX.",
-                 path,
-                 reinterpret_cast<unsigned long long>(texture));
-    }
     return texture;
 }
 
@@ -771,15 +675,14 @@ bool ApplyCachedCursorTexture(
     const char* path,
     const std::string& normalizedPath,
     float hotspotX,
-    float hotspotY,
-    bool traceEnabled)
+    float hotspotY)
 {
     if (!hardwareMouse || !gCryStringAssign || IsHardwareMouseUsingSystemCursor(hardwareMouse))
     {
         return false;
     }
 
-    void* texture = LoadCursorTextureCached(path, normalizedPath, traceEnabled);
+    void* texture = LoadCursorTextureCached(path, normalizedPath);
     if (!texture)
     {
         return false;
@@ -935,22 +838,7 @@ public:
 
         std::lock_guard lock(gStateMutex);
         ++gState.observedCVarCount;
-        const unsigned long long observedCount = gState.observedCVarCount;
-        const bool allowedPath = IsAllowedPath(normalized);
-        const bool fallbackPath = IsEngineFallbackPath(normalized);
-
-        if (gState.traceEnabled && ShouldLogSample(observedCount))
-        {
-            LogDebug("CursorHook observed r_MouseCursorTexture before old=%s new=%s normalized=%s allowed=%d fallback=%d lock=%d lastAllowed=%s count=%llu",
-                     pVar->GetString() ? pVar->GetString() : "<null>",
-                     sNewValue,
-                     normalized.c_str(),
-                     allowedPath ? 1 : 0,
-                     fallbackPath ? 1 : 0,
-                     gState.lockEnabled ? 1 : 0,
-                     gState.lastAllowedPath.c_str(),
-                     observedCount);
-        }
+        const bool allowedPath = IsAllowedPathLocked(normalized);
 
         if (allowedPath)
         {
@@ -962,18 +850,7 @@ public:
 
     void OnAfterVarChange(ICVar* pVar) override
     {
-        if (!pVar || _stricmp(pVar->GetName(), kCursorCVarName) != 0)
-        {
-            return;
-        }
-
-        std::lock_guard lock(gStateMutex);
-        if (gState.traceEnabled && ShouldLogSample(gState.observedCVarCount))
-        {
-            LogDebug("CursorHook observed r_MouseCursorTexture after value=%s count=%llu",
-                     pVar->GetString() ? pVar->GetString() : "<null>",
-                     gState.observedCVarCount);
-        }
+        (void)pVar;
     }
 };
 
@@ -998,47 +875,31 @@ void __thiscall HookedCursorCVarSetString(ICVar* cvar, const char* value)
     bool substitute = false;
     bool allowedPath = false;
     bool fallbackPath = false;
-    bool traceEnabled = false;
-    unsigned long long observedCount = 0;
     unsigned long long substitutedCount = 0;
     const char* substitutedPath = nullptr;
 
     {
         std::lock_guard lock(gStateMutex);
         ++gState.observedCVarCount;
-        observedCount = gState.observedCVarCount;
-        traceEnabled = gState.traceEnabled;
-        allowedPath = IsAllowedPath(normalized);
+        allowedPath = IsAllowedPathLocked(normalized);
         fallbackPath = IsEngineFallbackPath(normalized);
 
         if (allowedPath)
         {
             RememberAllowedPathLocked(safeValue, "cvar-set");
         }
-        else if (gState.lockEnabled && fallbackPath && gState.lastAllowedStablePath)
+        else if (fallbackPath && GetEffectiveFallbackPathLocked())
         {
             substitute = true;
-            substitutedPath = gState.lastAllowedStablePath;
+            substitutedPath = GetEffectiveFallbackPathLocked();
             ++gState.substitutedCVarCount;
             substitutedCount = gState.substitutedCVarCount;
-        }
-
-        if (traceEnabled && ShouldLogSample(observedCount))
-        {
-            LogDebug("CursorHook observed ICVar::Set r_MouseCursorTexture value=%s normalized=%s allowed=%d fallback=%d substitute=%d lastAllowed=%s count=%llu",
-                     safeValue,
-                     normalized.c_str(),
-                     allowedPath ? 1 : 0,
-                     fallbackPath ? 1 : 0,
-                     substitute ? 1 : 0,
-                     gState.lastAllowedPath.c_str(),
-                     observedCount);
         }
     }
 
     if (substitute)
     {
-        if (substitutedCount == 1 || (traceEnabled && ShouldLogSample(substitutedCount)))
+        if (substitutedCount == 1)
         {
             LogDebug("CursorHook substituted ICVar::Set r_MouseCursorTexture fallback=%s with=%s count=%llu",
                      safeValue,
@@ -1177,67 +1038,33 @@ bool __thiscall HookedSetCursorPath(void* hardwareMouse, const char* path, const
     bool block = false;
     bool allowedPath = false;
     bool fallbackPath = false;
-    bool lockEnabled = false;
-    bool traceEnabled = false;
-    bool shouldTraceSetCursorLog = false;
-    unsigned long long observedCount = 0;
     unsigned long long blockedCount = 0;
     unsigned long long cachedCount = 0;
-    std::string traceLastAllowedPath;
-    std::string traceCVarValue;
 
     {
         std::lock_guard lock(gStateMutex);
         ++gState.observedSetCursorCount;
-        observedCount = gState.observedSetCursorCount;
 
         normalizedPath = NormalizePath(safePath);
-        traceEnabled = gState.traceEnabled;
-        lockEnabled = gState.lockEnabled;
-        allowedPath = IsAllowedPath(normalizedPath);
+        allowedPath = IsAllowedPathLocked(normalizedPath);
         fallbackPath = IsEngineFallbackPath(normalizedPath);
 
         if (allowedPath)
         {
             forwardedPath = RememberAllowedPathLocked(safePath, "SetCursor");
         }
-        else if (gState.lockEnabled && fallbackPath && gState.lastAllowedStablePath)
+        else if (fallbackPath && GetEffectiveFallbackPathLocked())
         {
             block = true;
-            keptPath = gState.lastAllowedStablePath;
+            keptPath = GetEffectiveFallbackPathLocked();
             ++gState.blockedSetCursorCount;
             blockedCount = gState.blockedSetCursorCount;
         }
-
-        shouldTraceSetCursorLog = traceEnabled && ShouldLogSample(observedCount);
-        if (shouldTraceSetCursorLog)
-        {
-            traceLastAllowedPath = gState.lastAllowedPath;
-            const char* cvarValue = GetCursorCVarString();
-            traceCVarValue = cvarValue ? cvarValue : "<null>";
-        }
-    }
-
-    if (shouldTraceSetCursorLog)
-    {
-        const std::string caller = FormatAddress(_ReturnAddress());
-        LogDebug("CursorHook observed SetCursor path=%s normalized=%s allowed=%d fallback=%d lock=%d lastAllowed=%s cvar=%s hotspot=%.3f,%.3f caller=%s count=%llu",
-                 safePath,
-                 normalizedPath.c_str(),
-                 allowedPath ? 1 : 0,
-                 fallbackPath ? 1 : 0,
-                 lockEnabled ? 1 : 0,
-                 traceLastAllowedPath.c_str(),
-                 traceCVarValue.c_str(),
-                 hotspotX,
-                 hotspotY,
-                 caller.c_str(),
-                 observedCount);
     }
 
     if (block)
     {
-        if (blockedCount == 1 || (traceEnabled && ShouldLogSample(blockedCount)))
+        if (blockedCount == 1)
         {
             LogDebug("CursorHook blocked engine cursor fallback path=%s; keeping=%s count=%llu",
                      safePath,
@@ -1247,15 +1074,14 @@ bool __thiscall HookedSetCursorPath(void* hardwareMouse, const char* path, const
         return true;
     }
 
-    if (lockEnabled && allowedPath
-        && ApplyCachedCursorTexture(hardwareMouse, forwardedPath, normalizedPath, hotspotX, hotspotY, traceEnabled))
+    if (allowedPath && ApplyCachedCursorTexture(hardwareMouse, forwardedPath, normalizedPath, hotspotX, hotspotY))
     {
         {
             std::lock_guard lock(gStateMutex);
             ++gState.cachedSetCursorCount;
             cachedCount = gState.cachedSetCursorCount;
         }
-        if (cachedCount == 1 || (traceEnabled && ShouldLogSample(cachedCount)))
+        if (cachedCount == 1)
         {
             LogDebug("CursorHook applied cached cursor texture path=%s texture=0x%llX count=%llu",
                      forwardedPath ? forwardedPath : "<null>",
@@ -1376,38 +1202,53 @@ bool InstallSetCursorEntryDetour(std::uintptr_t cursorPathSetter, std::size_t pa
             patchSize);
     return true;
 }
+
+bool IsUsableCursorPath(const char* path, std::string& normalizedPath)
+{
+    if (!path || !path[0])
+    {
+        return false;
+    }
+
+    normalizedPath = NormalizePath(path);
+    return !normalizedPath.empty() && !IsEngineFallbackPath(normalizedPath);
+}
+
+void MarkInstallFailed()
+{
+    gInstallState.store(InstallState::Failed, std::memory_order_release);
+}
+}
+
+void PrepareInstall()
+{
+    if (!HasCommandLineFlag(kHookFlag))
+    {
+        gInstallState.store(InstallState::Disabled, std::memory_order_release);
+        return;
+    }
+
+    InstallState expected = InstallState::Disabled;
+    gInstallState.compare_exchange_strong(
+        expected,
+        InstallState::Pending,
+        std::memory_order_acq_rel,
+        std::memory_order_acquire);
 }
 
 void Install(std::uintptr_t envAddress)
 {
-    const bool diagnosticEnabled = HasCommandLineFlag(kDiagnosticFlag);
-    const bool lockEnabled = HasCommandLineFlag(kLockFlag);
-    const bool traceEnabled = HasCommandLineFlag(kTraceFlag);
-    if (!diagnosticEnabled && !lockEnabled)
+    PrepareInstall();
+    if (gInstallState.load(std::memory_order_acquire) != InstallState::Pending)
     {
         return;
     }
-
-    {
-        std::lock_guard lock(gStateMutex);
-        gState.lockEnabled = lockEnabled;
-        gState.traceEnabled = traceEnabled;
-        gState.allowedPrefixes = GetAllowedPrefixesFromCommandLine();
-        std::string prefixList;
-        for (const std::string& prefix : gState.allowedPrefixes)
-        {
-            if (!prefixList.empty())
-            {
-                prefixList += ", ";
-            }
-            prefixList += prefix;
-        }
-        LogInfo("CursorHook allowed cursor prefixes: %s", prefixList.c_str());
-    }
+    LogInfo("CursorHook enabled by -kcd2dbCursorHook.");
 
     const auto cursorPathSetter = ResolveCursorPathSetter();
     if (!cursorPathSetter)
     {
+        MarkInstallFailed();
         return;
     }
 
@@ -1427,13 +1268,12 @@ void Install(std::uintptr_t envAddress)
         LogWarn("CursorHook requested, but pHardwareMouse could not be validated by vtable scan. gEnv+0x%llX=0x%llX.",
                 static_cast<unsigned long long>(kHardwareMouseOffset),
                 reinterpret_cast<unsigned long long>(offsetFallback));
+        MarkInstallFailed();
         return;
     }
 
-    if (lockEnabled)
-    {
-        ResolveTextureCacheBindings(cursorPathSetter->address);
-    }
+    gHardwareMouse.store(hardwareMouse, std::memory_order_release);
+    ResolveTextureCacheBindings(cursorPathSetter->address);
     gCursorCVarSetStringVtableOffset.store(
         cursorPathSetter->cvarSetStringVtableOffset,
         std::memory_order_release);
@@ -1441,11 +1281,98 @@ void Install(std::uintptr_t envAddress)
     if (!InstallSetCursorEntryDetour(cursorPathSetter->address, cursorPathSetter->patchSize))
     {
         gCursorCVarSetStringVtableOffset.store(0, std::memory_order_release);
+        MarkInstallFailed();
         return;
     }
 
+    gInstallState.store(InstallState::Installed, std::memory_order_release);
+
     InstallConsoleVarSinkIfNeeded();
     InstallCursorCVarSetHookIfNeeded();
+}
+
+bool IsInstalled()
+{
+    return gSetCursorDetourTarget.load(std::memory_order_acquire) != nullptr;
+}
+
+bool DeclareCursorPath(const char* path)
+{
+    const bool canDeclare =
+        IsInstalled() || gInstallState.load(std::memory_order_acquire) == InstallState::Pending;
+    if (!canDeclare)
+    {
+        return false;
+    }
+
+    std::string normalizedPath;
+    if (!IsUsableCursorPath(path, normalizedPath))
+    {
+        return false;
+    }
+
+    {
+        std::lock_guard lock(gStateMutex);
+        DeclareCursorPathLocked(path, normalizedPath, "Lua");
+    }
+    return true;
+}
+
+bool LockCursorPath(const char* path)
+{
+    if (!IsInstalled())
+    {
+        return false;
+    }
+
+    std::string normalizedPath;
+    if (!IsUsableCursorPath(path, normalizedPath))
+    {
+        return false;
+    }
+
+    const char* stablePath = nullptr;
+    {
+        std::lock_guard lock(gStateMutex);
+        stablePath = InternPathLocked(path);
+    }
+
+    void* hardwareMouse = gHardwareMouse.load(std::memory_order_acquire);
+    const float hotspotX = ReadObjectFloat(hardwareMouse, kCursorHotspotXOffset, 0.0f);
+    const float hotspotY = ReadObjectFloat(hardwareMouse, kCursorHotspotYOffset, 0.0f);
+    if (!hardwareMouse || !ApplyCachedCursorTexture(hardwareMouse, stablePath, normalizedPath, hotspotX, hotspotY))
+    {
+        LogWarn("CursorHook could not apply locked cursor path: %s", stablePath ? stablePath : path);
+        return false;
+    }
+
+    {
+        std::lock_guard lock(gStateMutex);
+        DeclareCursorPathLocked(stablePath, normalizedPath, "Lua lock");
+        RememberAllowedPathLocked(stablePath, "Lua lock");
+        gState.lockedStablePath = stablePath;
+        gState.lockedNormalizedPath = normalizedPath;
+        if (!gState.loggedFirstLockedPath)
+        {
+            gState.loggedFirstLockedPath = true;
+            LogDebug("CursorHook locked first cursor path: %s", stablePath);
+        }
+    }
+    return true;
+}
+
+bool UnlockCursorPath()
+{
+    if (!IsInstalled())
+    {
+        return false;
+    }
+
+    std::lock_guard lock(gStateMutex);
+    const bool wasLocked = gState.lockedStablePath != nullptr;
+    gState.lockedStablePath = nullptr;
+    gState.lockedNormalizedPath.clear();
+    return wasLocked;
 }
 
 void Restore()
@@ -1485,6 +1412,7 @@ void Restore()
 
     RemoveConsoleVarSinkIfNeeded();
 
+    gHardwareMouse.store(nullptr, std::memory_order_release);
     gTextureSystem.store(nullptr, std::memory_order_release);
     gTextureLoadVtableOffset.store(0, std::memory_order_release);
     gCryStringAssign = nullptr;
@@ -1503,6 +1431,7 @@ void Restore()
             std::memcpy(detourTarget, gSetCursorOriginalBytes.data(), patchSize);
             FlushInstructionCache(GetCurrentProcess(), detourTarget, patchSize);
             gSetCursorDetourTarget.store(nullptr, std::memory_order_release);
+            gInstallState.store(InstallState::Disabled, std::memory_order_release);
             gOriginalSetCursorPath = nullptr;
             gSetCursorDetourPatchSize = 0;
 
