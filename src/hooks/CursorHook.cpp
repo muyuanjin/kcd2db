@@ -538,12 +538,12 @@ bool ResolveTextureCacheBindings(std::uintptr_t cursorPathSetter)
     gTextureSystem.store(textureSystem, std::memory_order_release);
     gTextureLoadVtableOffset.store(bindings->loadVtableOffset, std::memory_order_release);
     gCryStringAssign = std::bit_cast<CryStringAssignFunc>(stringAssign);
-    LogInfo("CursorHook resolved texture cache bindings: textureGlobal=0x%llX textureSystem=0x%llX loadOffset=0x%llX loadSlot=0x%llX stringAssign=0x%llX.",
-            static_cast<unsigned long long>(bindings->textureSystemGlobalAddress),
-            reinterpret_cast<unsigned long long>(textureSystem),
-            static_cast<unsigned long long>(bindings->loadVtableOffset),
-            reinterpret_cast<unsigned long long>(loadTexture),
-            reinterpret_cast<unsigned long long>(stringAssign));
+    LogDebug("CursorHook resolved texture cache bindings: textureGlobal=0x%llX textureSystem=0x%llX loadOffset=0x%llX loadSlot=0x%llX stringAssign=0x%llX.",
+             static_cast<unsigned long long>(bindings->textureSystemGlobalAddress),
+             reinterpret_cast<unsigned long long>(textureSystem),
+             static_cast<unsigned long long>(bindings->loadVtableOffset),
+             reinterpret_cast<unsigned long long>(loadTexture),
+             reinterpret_cast<unsigned long long>(stringAssign));
     return true;
 }
 
@@ -901,7 +901,7 @@ void InstallConsoleVarSinkIfNeeded()
 
     gEnv.pConsole->AddConsoleVarSink(&gConsoleVarSink);
     gConsoleSinkInstalled = true;
-    LogInfo("CursorHook installed r_MouseCursorTexture console var sink.");
+    LogDebug("CursorHook installed r_MouseCursorTexture console var sink.");
 }
 
 void RemoveConsoleVarSinkIfNeeded()
@@ -992,10 +992,10 @@ void InstallCursorCVarSetHookIfNeeded()
         LogWarn("CursorHook installed ICVar::Set hook, but restoring page protection failed: %lu.", GetLastError());
     }
 
-    LogInfo("CursorHook installed r_MouseCursorTexture ICVar::Set hook: slotIndex=%zu, slotOffset=0x%llX, original=0x%llX.",
-            cvarSetStringVtableOffset / sizeof(void*),
-            static_cast<unsigned long long>(cvarSetStringVtableOffset),
-            reinterpret_cast<unsigned long long>(original));
+    LogDebug("CursorHook installed r_MouseCursorTexture ICVar::Set hook: slotIndex=%zu, slotOffset=0x%llX, original=0x%llX.",
+             cvarSetStringVtableOffset / sizeof(void*),
+             static_cast<unsigned long long>(cvarSetStringVtableOffset),
+             reinterpret_cast<unsigned long long>(original));
 }
 
 bool __thiscall HookedSetCursorPath(void* hardwareMouse, const char* path, const float hotspotX, const float hotspotY)
@@ -1170,10 +1170,10 @@ bool InstallSetCursorEntryDetour(std::uintptr_t cursorPathSetter, std::size_t pa
     }
 
     gSetCursorDetourTarget.store(target, std::memory_order_release);
-    LogInfo("CursorHook installed SetCursor entry detour: target=0x%llX trampoline=0x%llX patchSize=%zu.",
-            reinterpret_cast<unsigned long long>(target),
-            reinterpret_cast<unsigned long long>(trampoline),
-            patchSize);
+    LogDebug("CursorHook installed SetCursor entry detour: target=0x%llX trampoline=0x%llX patchSize=%zu.",
+             reinterpret_cast<unsigned long long>(target),
+             reinterpret_cast<unsigned long long>(trampoline),
+             patchSize);
     return true;
 }
 
