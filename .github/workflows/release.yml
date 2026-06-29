@@ -51,10 +51,15 @@ jobs:
       # 打包文件
       - name: Package into ZIP
         run: |
-          New-Item -ItemType Directory -Path release-package
-          Copy-Item build\Release\*.asi release-package
-          Copy-Item asi-loader\*.dll release-package
-          Compress-Archive -Path release-package\* -DestinationPath kcd2db-${{ github.REF_NAME }}.zip
+          New-Item -ItemType Directory -Path release-package-db
+          Copy-Item build\Release\kcd2db.asi release-package-db
+          Copy-Item asi-loader\*.dll release-package-db
+          Compress-Archive -Path release-package-db\* -DestinationPath kcd2db-${{ github.REF_NAME }}.zip
+
+          New-Item -ItemType Directory -Path release-package-cursor
+          Copy-Item build\Release\kcd2cursor.asi release-package-cursor
+          Copy-Item asi-loader\*.dll release-package-cursor
+          Compress-Archive -Path release-package-cursor\* -DestinationPath kcd2cursor-${{ github.REF_NAME }}.zip
 
       - name: Package fake DB fallback mod
         run: |
@@ -93,11 +98,16 @@ jobs:
 
           ## Installation
 
-          Extract **ALL** files from this ZIP to your game directory:
+          Extract **ALL** files from the selected ASI ZIP to your game directory:
           ``KingdomComeDeliverance2/Bin/Win64MasterMasterSteamPGO/``
 
-          Contains:
-          - Mod ASI file ($env:GITHUB_REPOSITORY)
+          Assets:
+          - ``kcd2db-$env:RELEASE_TAG.zip``: Lua persistence module.
+          - ``kcd2cursor-$env:RELEASE_TAG.zip``: standalone cursor hook module.
+          - ``kcd2db_fake_db-$env:RELEASE_TAG.zip``: diagnostic fake DB fallback mod.
+
+          Each ASI ZIP contains:
+          - The selected ASI file
           - Latest Ultimate-ASI-Loader (x64)
 
           ## Mod Authors
@@ -121,6 +131,7 @@ jobs:
         with:
           files: |
             kcd2db-${{ github.REF_NAME }}.zip
+            kcd2cursor-${{ github.REF_NAME }}.zip
             dist/kcd2db_fake_db.lua
             kcd2db_fake_db-${{ github.ref_name }}.zip
           prerelease: ${{ steps.release_meta.outputs.prerelease }}

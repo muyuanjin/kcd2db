@@ -1,7 +1,6 @@
 #include "CursorHook.h"
 
 #include <windows.h>
-#include <shellapi.h>
 
 #include <algorithm>
 #include <array>
@@ -35,7 +34,6 @@ constexpr std::uintptr_t kHardwareMouseOffset = 0x100;
 constexpr std::uintptr_t kEnvScanStartOffset = 0x80;
 constexpr std::uintptr_t kEnvScanEndOffset = 0x180;
 constexpr int kSetCursorPathIndex = 18;
-constexpr std::wstring_view kHookFlag = L"-kcd2dbCursorHook";
 constexpr const char* kClientDll = "WHGame.DLL";
 constexpr const char* kCursorCVarName = "r_MouseCursorTexture";
 constexpr std::size_t kMaxSetCursorDetourPatchSize = 32;
@@ -130,30 +128,6 @@ std::unordered_map<std::string, void*> gTextureCache;
 bool gConsoleSinkInstalled = false;
 std::atomic<void*> gHardwareMouse{nullptr};
 thread_local bool gInsideCursorCVarSetHook = false;
-
-bool HasCommandLineFlag(std::wstring_view flag)
-{
-    int argc = 0;
-    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    if (!argv)
-    {
-        return false;
-    }
-
-    const std::wstring expected(flag);
-    bool found = false;
-    for (int i = 1; i < argc; ++i)
-    {
-        if (_wcsicmp(argv[i], expected.c_str()) == 0)
-        {
-            found = true;
-            break;
-        }
-    }
-
-    LocalFree(argv);
-    return found;
-}
 
 std::string NormalizePath(std::string_view path)
 {
@@ -1222,12 +1196,6 @@ void MarkInstallFailed()
 
 void PrepareInstall()
 {
-    if (!HasCommandLineFlag(kHookFlag))
-    {
-        gInstallState.store(InstallState::Disabled, std::memory_order_release);
-        return;
-    }
-
     InstallState expected = InstallState::Disabled;
     gInstallState.compare_exchange_strong(
         expected,
@@ -1243,7 +1211,7 @@ void Install(std::uintptr_t envAddress)
     {
         return;
     }
-    LogInfo("CursorHook enabled by -kcd2dbCursorHook.");
+    LogInfo("KCD2Cursor hook enabled.");
 
     const auto cursorPathSetter = ResolveCursorPathSetter();
     if (!cursorPathSetter)

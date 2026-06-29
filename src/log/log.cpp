@@ -16,7 +16,23 @@
 
 #include "../util/StringUtils.h"
 
-auto Filename = "kcd2db.log";
+#ifndef KCD2_LOG_FILE
+#define KCD2_LOG_FILE "kcd2db.log"
+#endif
+
+#ifndef KCD2_LOG_FILE_WIDE
+#define KCD2_LOG_FILE_WIDE L"kcd2db.log"
+#endif
+
+#ifndef KCD2_LOG_PREFIX
+#define KCD2_LOG_PREFIX "[kcd2db]"
+#endif
+
+#ifndef KCD2_CONSOLE_LOG_PREFIX
+#define KCD2_CONSOLE_LOG_PREFIX L"-kcd2dbConsoleLog="
+#endif
+
+auto Filename = KCD2_LOG_FILE;
 HANDLE ConsoleHandle = nullptr;
 
 namespace
@@ -115,8 +131,8 @@ bool LoadConsoleLogLevelFromCommandLine()
     if (!argv) return false;
 
     bool hasInvalidValue = false;
-    constexpr auto prefix = L"-kcd2dbConsoleLog=";
-    constexpr auto prefixLength = sizeof(L"-kcd2dbConsoleLog=") / sizeof(wchar_t) - 1;
+    constexpr auto prefix = KCD2_CONSOLE_LOG_PREFIX;
+    constexpr auto prefixLength = sizeof(KCD2_CONSOLE_LOG_PREFIX) / sizeof(wchar_t) - 1;
 
     for (int i = 1; i < argc; i++)
     {
@@ -165,7 +181,7 @@ static void LogVA(LogLevel level, const char* format, va_list args)
         GetConsoleScreenBufferInfo(ConsoleHandle, &originalInfo);
 
         SetConsoleTextAttribute(ConsoleHandle, config.consoleColor);
-        std::string consoleMsg = std::string("[kcd2db]") + config.plainPrefix + message + "\n";
+        std::string consoleMsg = std::string(KCD2_LOG_PREFIX) + config.plainPrefix + message + "\n";
         DWORD written;
         WriteConsoleA(ConsoleHandle, consoleMsg.c_str(), consoleMsg.length(), &written, nullptr);
         SetConsoleTextAttribute(ConsoleHandle, originalInfo.wAttributes);
@@ -174,7 +190,7 @@ static void LogVA(LogLevel level, const char* format, va_list args)
     // 写入游戏控制台
     if (writeToConsole && gEnv && gEnv->pConsole)
     {
-        std::string consoleMsg = std::string(config.colorCode) + "[kcd2db]" + config.plainPrefix + message + "\n";
+        std::string consoleMsg = std::string(config.colorCode) + KCD2_LOG_PREFIX + config.plainPrefix + message + "\n";
         gEnv->pConsole->PrintLine(consoleMsg.c_str());
     }
 
@@ -246,10 +262,10 @@ void Log_init()
         std::tm tm{};
         localtime_s(&tm, &t);
         out << "\nLog initialized at " << std::put_time(&tm, "%F %T") << '\n';
-        out << "[DEBUG] Log file path: " << GetFullPath(L"kcd2db.log") << '\n';
+        out << "[DEBUG] Log file path: " << GetFullPath(KCD2_LOG_FILE_WIDE) << '\n';
         if (hasInvalidConsoleLogLevel)
         {
-            out << "[WARN]  Invalid -kcd2dbConsoleLog value; using info." << '\n';
+            out << "[WARN]  Invalid console log level value; using info." << '\n';
         }
     }
     else

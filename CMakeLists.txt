@@ -52,10 +52,34 @@ if (CRYENGINE_SDK_HEADERS)
     )
 endif ()
 
-file(GLOB_RECURSE KCD2DB_SOURCES CONFIGURE_DEPENDS
-        "src/*.cpp"
-        "src/*.h"
+set(KCD2DB_COMMON_SOURCES
+        src/game/GameEnvLocator.cpp
+        src/game/GameEnvLocator.h
+        src/log/log.cpp
+        src/log/log.h
+        src/util/ModuleUtils.cpp
+        src/util/ModuleUtils.h
+        src/util/StringUtils.cpp
+        src/util/StringUtils.h
 )
+
+set(KCD2DB_SOURCES
+        src/kcd2db.cpp
+        src/db/LuaDB.cpp
+        src/db/LuaDB.h
+        src/lua/LuaRunner.cpp
+        src/lua/LuaRunner.h
+        src/lua/db.h
+        ${KCD2DB_COMMON_SOURCES}
+)
+
+set(KCD2CURSOR_SOURCES
+        src/kcd2cursor.cpp
+        src/hooks/CursorHook.cpp
+        src/hooks/CursorHook.h
+        ${KCD2DB_COMMON_SOURCES}
+)
+
 add_library(kcd2db SHARED ${KCD2DB_SOURCES})
 # Define LM_EXPORT to use libmem as a static library
 target_compile_definitions(kcd2db PRIVATE
@@ -67,3 +91,17 @@ target_compile_definitions(kcd2db PRIVATE
 target_link_libraries(kcd2db PRIVATE cryengine_sdk libmem::libmem ntdll shell32 ws2_32 SQLiteCpp SQLite::SQLite3)
 
 set_target_properties(kcd2db PROPERTIES SUFFIX ".asi" PREFIX "")
+
+add_library(kcd2cursor SHARED ${KCD2CURSOR_SOURCES})
+target_compile_definitions(kcd2cursor PRIVATE
+        LM_EXPORT
+        KCD2CURSOR_VERSION="${KCD2DB_VERSION}"
+        KCD2CURSOR_BUILD_CONFIG="$<CONFIG>"
+        KCD2_LOG_FILE="kcd2cursor.log"
+        KCD2_LOG_FILE_WIDE=L"kcd2cursor.log"
+        KCD2_LOG_PREFIX="[kcd2cursor]"
+        KCD2_CONSOLE_LOG_PREFIX=L"-kcd2cursorConsoleLog="
+)
+target_link_libraries(kcd2cursor PRIVATE cryengine_sdk libmem::libmem ntdll shell32 ws2_32)
+target_include_directories(kcd2cursor PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/log")
+set_target_properties(kcd2cursor PROPERTIES SUFFIX ".asi" PREFIX "")

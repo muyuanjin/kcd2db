@@ -40,7 +40,6 @@ _G.KCD2DB.backend = "sqlite"
 _G.KCD2DB.version = ")lua" KCD2DB_VERSION R"lua("
 
 local __kcd2db_existing_db = _G.DB
-local __kcd2db_existing_cursor = _G.KCD2DB.Cursor
 
 _G.DB = (function()
     local function log_warning(message)
@@ -172,60 +171,6 @@ _G.DB = (function()
             return func(unpack(call_args, 1, param_count))
         end
     end
-
-    local function install_cursor_api()
-        local cursor = __kcd2db_existing_cursor
-        if type(cursor) ~= "table" then
-            cursor = {}
-            if __kcd2db_existing_cursor ~= nil then
-                _G.KCD2DB.conflicts.Cursor = __kcd2db_existing_cursor
-                log_warning("Replaced non-table KCD2DB.Cursor value.")
-            end
-        end
-
-        if type(_G.KCD2DB.conflicts.Cursor_fields) ~= "table" then
-            _G.KCD2DB.conflicts.Cursor_fields = {}
-        end
-
-        local function set_cursor_field(key, value)
-            if cursor[key] ~= nil then
-                _G.KCD2DB.conflicts.Cursor_fields[key] = cursor[key]
-                log_warning("Overwrote existing KCD2DB.Cursor." .. tostring(key) .. " field.")
-            end
-            cursor[key] = value
-        end
-
-        local function has_native_cursor_api(name)
-            return type(LuaDB) == "table" and type(LuaDB[name]) == "function"
-        end
-
-        local function declareImpl(path)
-            if has_native_cursor_api("CursorDeclare") then
-                return LuaDB.CursorDeclare(path)
-            end
-            return false
-        end
-
-        local function lockImpl(path)
-            if has_native_cursor_api("CursorLock") then
-                return LuaDB.CursorLock(path)
-            end
-            return false
-        end
-
-        local function unlockImpl()
-            if has_native_cursor_api("CursorUnlock") then
-                return LuaDB.CursorUnlock()
-            end
-            return false
-        end
-
-        set_cursor_field("Declare", wrap(declareImpl, 1, cursor))
-        set_cursor_field("Lock", wrap(lockImpl, 1, cursor))
-        set_cursor_field("Unlock", wrap(unlockImpl, 0, cursor))
-        _G.KCD2DB.Cursor = cursor
-    end
-    install_cursor_api()
 
     local function setImpl(key, value)
         local encoded, ok = encode_value(value, "DB.Set key=" .. tostring(key))

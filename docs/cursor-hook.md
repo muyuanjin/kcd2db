@@ -1,68 +1,63 @@
-# Cursor Hook
+# KCD2Cursor
 
-## Purpose
+`kcd2cursor.asi` is a standalone native cursor hook for Kingdom Come: Deliverance II mods that replace the mouse cursor texture.
 
-Cursor Hook is an opt-in native hook for mods that replace the mouse cursor texture. Some cursor mods update `r_MouseCursorTexture` correctly, but the engine can still briefly reapply its built-in cursor while the mouse is moving. This feature keeps mod-controlled cursor textures active by blocking known engine fallback cursor paths after a mod cursor path has been observed, and by applying mod cursor frames through a cached texture path that does not clear the active cursor texture first.
+It is separate from `kcd2db.asi`: cursor hook code is compiled only into `kcd2cursor.asi`, and Lua persistence code is compiled only into `kcd2db.asi`.
 
-The feature is disabled by default.
+## What It Does
 
-## Launch Flag
+Some cursor mods update `r_MouseCursorTexture` correctly, but the engine can still briefly reapply its built-in cursor while the mouse is moving. The map UI can also switch or move cursor resources in a way that leaves stale texture resources behind and can crash later.
 
-Enable the cursor hook:
+`kcd2cursor.asi` addresses those cases by:
 
-```text
--kcd2dbCursorHook
+- remembering the most recent mod-controlled cursor texture path,
+- blocking known engine fallback cursor writes after a mod cursor has been observed,
+- substituting fallback writes before they mutate `r_MouseCursorTexture`,
+- applying mod cursor frames through a cached texture path that does not clear the active cursor texture first,
+- keeping successful `Lock(path)` calls as the preferred post-unlock fallback cursor.
+
+Installing `kcd2cursor.asi` enables the hook. No `kcd2db` command-line flag is required.
+
+## Default Cursor Scope
+
+Any cursor texture path under `Data/Textures/Cursor*` is treated as mod-controlled automatically and does not need Lua registration.
+
+Matching is normalized, so `data/textures/cursor*` also works. `Data/Textures/Cursor*` is the recommended spelling because it follows the game's data path casing convention.
+
+Examples that do not need `KCD2Cursor.Declare(path)`:
+
+```lua
+System.SetCVar("r_MouseCursorTexture", "Data/Textures/CursorMyMod/frame_01.dds")
+System.SetCVar("r_MouseCursorTexture", "Data/Textures/Cursor/MyMod/frame_01.dds")
 ```
 
-## Runtime Behavior
-
-The hook validates the game cursor setter by signature scanning `WHGame.dll`, then cross-checking the function address against the `IHardwareMouse` vtable found from `gEnv`. After validation, it installs a function-entry detour on the resolved cursor setter rather than only replacing the vtable slot. This is required because the engine has internal direct calls to the same setter that bypass the vtable.
-
-When `-kcd2dbCursorHook` is active:
-
-- Paths under `Data/Textures/Cursor`, `Data/Textures/CursorMouse`, `Data/Textures/CursorHand`, and `Data/Textures/CursorDagger` are treated as mod-controlled cursor textures.
-- Paths declared through `KCD2DB.Cursor.Declare(path)` or `KCD2DB.Cursor.Lock(path)` are also treated as mod-controlled cursor textures.
-- The most recent mod-controlled cursor path is remembered.
-- A path locked through `KCD2DB.Cursor.Lock(path)` is preferred over the most recently observed path until `KCD2DB.Cursor.Unlock()` is called.
-- The concrete `ICVar::Set(const char*)` slot for `r_MouseCursorTexture` is hooked so known fallback writes are substituted with the last remembered mod path before they mutate the cvar.
-- Calls to the cursor setter with known engine fallback paths are blocked after a mod-controlled cursor path has been seen.
-- Calls to the cursor setter with mod-controlled paths load the texture through the engine texture system, cache it by normalized path, and swap it into the hardware mouse object without a transient null texture pointer.
-- Other cursor paths pass through unchanged.
-
-The hook does not animate cursors and does not replace mod logic. A cursor mod remains responsible for setting the current cursor texture; the hook only prevents the engine's fallback cursor from being inserted between mod-controlled frames.
+Use Lua registration only when your cursor textures live outside `Data/Textures/Cursor*`.
 
 ## Lua API
 
-Cursor APIs are exposed through `KCD2DB.Cursor`:
+`kcd2cursor.asi` exposes a global `KCD2Cursor` table:
 
 ```lua
-KCD2DB.Cursor.Declare("Data/Textures/MyCursor/frame_01.dds")
-KCD2DB.Cursor.Lock("Data/Textures/MyCursor/frame_01.dds")
-KCD2DB.Cursor.Unlock()
+KCD2Cursor.Declare("Data/Textures/MyCursor/frame_01.dds")
+KCD2Cursor.Lock("Data/Textures/MyCursor/frame_01.dds")
+KCD2Cursor.Unlock()
 ```
 
-`Declare(path)` marks a path as mod-controlled without changing the current locked path. Use it for cursor textures outside the default directories.
+`Declare(path)` marks a path as mod-controlled. It can be called during Lua startup while the native hook is still installing; valid declarations are queued and used after installation finishes. It returns `false` if validation has already failed.
 
 `Lock(path)` marks the path as mod-controlled, applies it immediately through the cached texture path, and makes it the preferred fallback replacement after that apply succeeds. Cursor animation mods can call `Lock(path)` only when their animation frame changes instead of repeatedly writing `r_MouseCursorTexture` every frame.
 
-`Unlock()` clears the explicit lock. After unlock, fallback replacement returns to the most recently observed mod-controlled cursor path.
+`Unlock()` clears the locked preference. After unlock, fallback writes use the most recent remembered mod-controlled cursor path.
 
-`Declare(path)` can be called during Lua startup while the native hook is still installing; when `-kcd2dbCursorHook` is present, valid declarations are queued and used after installation finishes. It returns `false` if the hook was not requested or validation has already failed. `Lock(path)` and `Unlock()` require an installed hook and return `false` if the hook is unavailable. `Lock(path)` also returns `false` if the cursor texture cannot be applied.
+## Safety Notes
 
-## Safety Boundaries
+- The `SetCursor` hook is installed only by `kcd2cursor.asi`.
+- The concrete `SetCursor` entry point is resolved by signature scan.
+- The `r_MouseCursorTexture` string setter vtable slot is derived from the resolved setter body instead of the shuffled `ICVar` declaration order.
+- If validation fails, the hook logs the failure and leaves engine cursor behavior unchanged.
 
-- The hook is not installed unless `-kcd2dbCursorHook` is present.
-- The target setter is resolved by signature scan and validated against the `IHardwareMouse` vtable before patching the function entry.
-- The texture cache binding is derived from the resolved setter body, including the engine texture-system global, the version-specific texture-load vtable slot, and the cursor path string assignment helper.
-- The `r_MouseCursorTexture` string setter vtable slot is also derived from the resolved setter body instead of the shuffled `ICVar` declaration order.
-- If validation fails, the hook logs a warning and leaves the game untouched.
-- If the texture cache bindings or a specific cursor texture load fail, that cursor setter call falls back to the original engine implementation.
-- The original function-entry bytes, trampoline, cvar hook, and console sink are restored on `DLL_PROCESS_DETACH` when the module is unloaded normally.
+## Debugging
 
-## Diagnostics
+With `-console`, the hook writes important cursor activity to `kcd2cursor.log`, including first accepted mod cursor path, first fallback substitution, first blocked engine fallback, and first cached texture application.
 
-With `-console`, the hook writes important cursor activity to `kcd2db.log`, including first accepted mod cursor path, first fallback substitution, first blocked engine fallback, and first cached texture application.
-
-## Default Scope
-
-Any cursor texture path under `Data/Textures/Cursor*` is treated as mod-controlled automatically and does not need `KCD2DB.Cursor.Declare(path)`. Matching is done after path normalization, so `data/textures/cursor*` works too; `Data/Textures/Cursor*` is the recommended spelling because it follows the game data path casing. Use `Declare(path)` or `Lock(path)` only for cursor textures stored outside that default scope.
+Use `-kcd2cursorConsoleLog=debug|info|warn|error|off` to change console log verbosity for this ASI.

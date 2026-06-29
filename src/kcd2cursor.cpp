@@ -9,20 +9,20 @@
 
 #define KCD2_ENV_IMPORT
 #include <cryengine/IGame.h>
+#include <cryengine/IScriptSystem.h>
 #include <cryengine/env.h>
 
-#include "db/LuaDB.h"
 #include "game/GameEnvLocator.h"
+#include "hooks/CursorHook.h"
 #include "log/log.h"
-#include "lua/LuaRunner.h"
 #include "util/StringUtils.h"
 
-#ifndef KCD2DB_VERSION
-#define KCD2DB_VERSION "dev"
+#ifndef KCD2CURSOR_VERSION
+#define KCD2CURSOR_VERSION "dev"
 #endif
 
-#ifndef KCD2DB_BUILD_CONFIG
-#define KCD2DB_BUILD_CONFIG "unknown"
+#ifndef KCD2CURSOR_BUILD_CONFIG
+#define KCD2CURSOR_BUILD_CONFIG "unknown"
 #endif
 
 namespace
@@ -32,7 +32,74 @@ using CompleteInitFunc = bool(__thiscall*)(IGame*);
 constexpr int kCompleteInitIndex = 4;
 
 CompleteInitFunc gOriginalCompleteInit = nullptr;
-std::atomic<LuaDB*> gLuaDB{nullptr};
+
+class KCD2CursorApi final : public CScriptableBase
+{
+public:
+    void RegisterLuaAPI()
+    {
+        if (m_registered)
+        {
+            LogDebug("KCD2Cursor API is already registered.");
+            return;
+        }
+
+        CScriptableBase::Init(gEnv->pScriptSystem, gEnv->pSystem);
+        SetGlobalName("KCD2Cursor");
+#undef SCRIPT_REG_CLASSNAME
+#define SCRIPT_REG_CLASSNAME &KCD2CursorApi::
+        SCRIPT_REG_TEMPLFUNC(Declare, "path");
+        SCRIPT_REG_TEMPLFUNC(Lock, "path");
+        SCRIPT_REG_TEMPLFUNC(Unlock, "");
+        if (m_pMethodsTable)
+        {
+            m_pMethodsTable->SetValue("version", KCD2CURSOR_VERSION);
+            m_pMethodsTable->SetValue("native", true);
+            m_pMethodsTable->SetValue("backend", "native");
+        }
+        m_registered = true;
+        LogInfo("KCD2Cursor Lua API loaded.");
+    }
+
+    bool IsRegistered() const
+    {
+        return m_registered;
+    }
+
+    int Declare(IFunctionHandler* handler)
+    {
+        const char* path = nullptr;
+        if (!handler->GetParam(1, path) || !path || path[0] == '\0')
+        {
+            LogWarn("KCD2Cursor.Declare invalid cursor path.");
+            return handler->EndFunction(false);
+        }
+
+        return handler->EndFunction(CursorHook::DeclareCursorPath(path));
+    }
+
+    int Lock(IFunctionHandler* handler)
+    {
+        const char* path = nullptr;
+        if (!handler->GetParam(1, path) || !path || path[0] == '\0')
+        {
+            LogWarn("KCD2Cursor.Lock invalid cursor path.");
+            return handler->EndFunction(false);
+        }
+
+        return handler->EndFunction(CursorHook::LockCursorPath(path));
+    }
+
+    int Unlock(IFunctionHandler* handler)
+    {
+        return handler->EndFunction(CursorHook::UnlockCursorPath());
+    }
+
+private:
+    bool m_registered = false;
+};
+
+std::atomic<KCD2CursorApi*> gCursorApi{nullptr};
 
 std::string GetCompilerVersion()
 {
@@ -98,58 +165,32 @@ std::string GetCurrentDirectoryPath()
     return kcd2db::WideToUtf8(buffer.c_str());
 }
 
-std::string MakeExpectedDbPath()
-{
-    std::string cwd = GetCurrentDirectoryPath();
-    if (cwd.empty() || cwd == "<unknown>")
-    {
-        return "<unknown>\\kcd2db.db";
-    }
-
-    const char last = cwd.back();
-    if (last != '\\' && last != '/')
-    {
-        cwd += '\\';
-    }
-    cwd += "kcd2db.db";
-    return cwd;
-}
-
 void LogStartupDiagnostics(HMODULE selfModule)
 {
-    LogDebug("kcd2db version: %s, config: %s, compiler: %s, arch: %s",
-             KCD2DB_VERSION,
-             KCD2DB_BUILD_CONFIG,
+    LogDebug("kcd2cursor version: %s, config: %s, compiler: %s, arch: %s",
+             KCD2CURSOR_VERSION,
+             KCD2CURSOR_BUILD_CONFIG,
              GetCompilerVersion().c_str(),
              GetTargetArch());
-    LogDebug("kcd2db.asi path: %s", GetModulePath(selfModule).c_str());
+    LogDebug("kcd2cursor.asi path: %s", GetModulePath(selfModule).c_str());
     LogDebug("Process exe path: %s", GetModulePath(nullptr).c_str());
     LogDebug("Current working directory: %s", GetCurrentDirectoryPath().c_str());
-    LogDebug("Expected DB path: %s", MakeExpectedDbPath().c_str());
     LogDebug("Command line: %s", kcd2db::WideToUtf8(GetCommandLineW()).c_str());
 }
 
 bool __thiscall HookedCompleteInit(IGame* game)
 {
-    LogDebug("HookedCompleteInit");
-    LuaDB* luaDB = gLuaDB.load(std::memory_order_acquire);
-    const auto waitStart = std::chrono::steady_clock::now();
-    auto nextWaitLog = waitStart + std::chrono::seconds(1);
-    while (luaDB == nullptr)
+    LogDebug("KCD2Cursor HookedCompleteInit");
+    KCD2CursorApi* api = gCursorApi.load(std::memory_order_acquire);
+    if (api)
     {
-        const auto now = std::chrono::steady_clock::now();
-        if (now >= nextWaitLog)
-        {
-            const auto waitedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - waitStart).count();
-            LogWarn("HookedCompleteInit is waiting for LuaDB initialization (%lld ms).", waitedMs);
-            nextWaitLog = now + std::chrono::seconds(5);
-        }
-        std::this_thread::yield();
-        luaDB = gLuaDB.load(std::memory_order_acquire);
+        api->RegisterLuaAPI();
+    }
+    else
+    {
+        LogWarn("KCD2Cursor Lua API object is unavailable during CompleteInit.");
     }
 
-    luaDB->RegisterLuaAPI();
-    LogDebug("HookedCompleteInit completed");
     return gOriginalCompleteInit(game);
 }
 
@@ -157,7 +198,7 @@ void RestoreCompleteInitHook()
 {
     if (!gEnv || gEnv->pGame == nullptr || gOriginalCompleteInit == nullptr)
     {
-        LogDebug("CompleteInit hook restore skipped; game or original function is unavailable.");
+        LogDebug("KCD2Cursor CompleteInit hook restore skipped; game or original function is unavailable.");
         return;
     }
 
@@ -167,14 +208,14 @@ void RestoreCompleteInitHook()
 
     if (*slot != hookPtr)
     {
-        LogWarn("CompleteInit hook restore skipped; vtable slot no longer points to this module.");
+        LogWarn("KCD2Cursor CompleteInit hook restore skipped; vtable slot no longer points to this module.");
         return;
     }
 
     DWORD oldProtect = 0;
     if (!VirtualProtect(slot, sizeof(void*), PAGE_EXECUTE_READWRITE, &oldProtect))
     {
-        LogWarn("CompleteInit hook restore failed; VirtualProtect returned %lu.", GetLastError());
+        LogWarn("KCD2Cursor CompleteInit hook restore failed; VirtualProtect returned %lu.", GetLastError());
         return;
     }
 
@@ -182,9 +223,10 @@ void RestoreCompleteInitHook()
     DWORD restoredOldProtect = 0;
     if (!VirtualProtect(slot, sizeof(void*), oldProtect, &restoredOldProtect))
     {
-        LogWarn("CompleteInit hook restore succeeded, but restoring page protection failed with %lu.", GetLastError());
+        LogWarn("KCD2Cursor CompleteInit hook restore succeeded, but restoring page protection failed with %lu.",
+                GetLastError());
     }
-    LogDebug("Restored CompleteInit hook.");
+    LogDebug("KCD2Cursor restored CompleteInit hook.");
 }
 
 bool InstallCompleteInitHook(IGame* game)
@@ -194,7 +236,7 @@ bool InstallCompleteInitHook(IGame* game)
     DWORD initialOldProtect = 0;
     if (!VirtualProtect(completeInitSlot, sizeof(void*), PAGE_EXECUTE_READWRITE, &initialOldProtect))
     {
-        LogError("Failed to make CompleteInit vtable slot writable at 0x%llX: %lu.",
+        LogError("KCD2Cursor failed to make CompleteInit vtable slot writable at 0x%llX: %lu.",
                  reinterpret_cast<std::uintptr_t>(completeInitSlot),
                  GetLastError());
         return false;
@@ -205,13 +247,13 @@ bool InstallCompleteInitHook(IGame* game)
         DWORD tempOldProtect = 0;
         if (!VirtualProtect(completeInitSlot, sizeof(void*), PAGE_EXECUTE_READWRITE, &tempOldProtect))
         {
-            LogError("Failed to keep CompleteInit vtable slot writable at 0x%llX: %lu.",
+            LogError("KCD2Cursor failed to keep CompleteInit vtable slot writable at 0x%llX: %lu.",
                      reinterpret_cast<std::uintptr_t>(completeInitSlot),
                      GetLastError());
             DWORD restoredOldProtect = 0;
             if (!VirtualProtect(completeInitSlot, sizeof(void*), initialOldProtect, &restoredOldProtect))
             {
-                LogWarn("Failed to restore CompleteInit vtable slot protection after hook install abort: %lu.",
+                LogWarn("KCD2Cursor failed to restore CompleteInit vtable slot protection after hook install abort: %lu.",
                         GetLastError());
             }
             return false;
@@ -227,53 +269,54 @@ bool InstallCompleteInitHook(IGame* game)
     DWORD restoredOldProtect = 0;
     if (!VirtualProtect(completeInitSlot, sizeof(void*), initialOldProtect, &restoredOldProtect))
     {
-        LogWarn("CompleteInit hook installed, but restoring page protection failed with %lu.", GetLastError());
+        LogWarn("KCD2Cursor CompleteInit hook installed, but restoring page protection failed with %lu.", GetLastError());
     }
 
-    LogDebug("Hooked CompleteInit function");
+    LogDebug("KCD2Cursor hooked CompleteInit function.");
     return true;
 }
 
 void Start()
 {
-    LogDebug("Main thread started");
+    LogDebug("KCD2Cursor main thread started.");
     const auto envAddress = kcd2db::FindEnvAddress();
     if (!envAddress)
     {
-        LogError("Failed to find environment address");
+        LogError("KCD2Cursor failed to find environment address.");
         return;
     }
 
-    LogDebug("Found environment address: 0x%llX", *envAddress);
+    LogDebug("KCD2Cursor found environment address: 0x%llX", *envAddress);
     const auto* envPtr = reinterpret_cast<SSystemGlobalEnvironment*>(envAddress.value());
 
     while (envPtr->pGame == nullptr)
     {
         std::this_thread::yield();
     }
-    LogDebug("Game Started");
+    LogDebug("KCD2Cursor game started.");
 
     gEnv = *envPtr;
+    gCursorApi.store(new KCD2CursorApi(), std::memory_order_release);
+    CursorHook::PrepareInstall();
+
     if (!InstallCompleteInitHook(gEnv->pGame))
     {
         return;
     }
 
-    LogInfo("Using LuaDB database at: %s", MakeExpectedDbPath().c_str());
-    const auto luaDB = new LuaDB();
-    gLuaDB.store(luaDB, std::memory_order_release);
-    LogDebug("LuaDB initialized");
+    CursorHook::Install(reinterpret_cast<std::uintptr_t>(envPtr));
 
     while (envPtr->pGame->GetIGameFramework() == nullptr
         || !envPtr->pGame->GetIGameFramework()->IsGameStarted())
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-    LogDebug("Game Framework Started");
+    LogDebug("KCD2Cursor game framework started.");
 
-    if (!luaDB->isRegistered())
+    KCD2CursorApi* api = gCursorApi.load(std::memory_order_acquire);
+    if (api && !api->IsRegistered())
     {
-        LogError("LuaDB was not registered by the CompleteInit hook; not registering from worker thread.");
+        LogError("KCD2Cursor Lua API was not registered by the CompleteInit hook.");
     }
 }
 
@@ -285,12 +328,12 @@ DWORD WINAPI MainThread(LPVOID)
     }
     catch (const std::exception& e)
     {
-        LogError("kcd2db main thread: %s", e.what());
+        LogError("kcd2cursor main thread: %s", e.what());
         return 1;
     }
     catch (...)
     {
-        LogError("kcd2db main thread: Unknown error");
+        LogError("kcd2cursor main thread: Unknown error");
         return 1;
     }
     return 0;
@@ -306,14 +349,14 @@ BOOL APIENTRY DllMain(const HMODULE hModule, const DWORD reason, LPVOID lpReserv
         {
             Log_init();
             LogStartupDiagnostics(static_cast<HMODULE>(moduleHandle));
-            LogDebug("DLL attached");
+            LogDebug("KCD2Cursor DLL attached.");
             if (HANDLE thread = CreateThread(nullptr, 0, MainThread, nullptr, 0, nullptr))
             {
                 CloseHandle(thread);
             }
             else
             {
-                LogError("Failed to create main thread");
+                LogError("KCD2Cursor failed to create main thread.");
             }
             return 0;
         }, hModule, 0, nullptr);
@@ -323,14 +366,14 @@ BOOL APIENTRY DllMain(const HMODULE hModule, const DWORD reason, LPVOID lpReserv
         }
         else
         {
-            LogError("Failed to create initialization thread: %lu", GetLastError());
+            LogError("KCD2Cursor failed to create initialization thread: %lu", GetLastError());
         }
     }
     else if (reason == DLL_PROCESS_DETACH)
     {
-        LuaRunner::Instance().Stop();
         if (lpReserved == nullptr)
         {
+            CursorHook::Restore();
             RestoreCompleteInitHook();
         }
         Log_close();

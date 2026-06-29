@@ -114,9 +114,6 @@ public:
     int AllG(IFunctionHandler* pH) { return GenericAccess(pH, AccessType::All, true); }
 
     int Dump(IFunctionHandler* pH);
-    int CursorDeclare(IFunctionHandler* pH);
-    int CursorLock(IFunctionHandler* pH);
-    int CursorUnlock(IFunctionHandler* pH);
 
     const char* getName() const { return m_sGlobalName; }
 
