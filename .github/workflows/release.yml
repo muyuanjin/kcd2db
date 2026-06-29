@@ -60,6 +60,14 @@ jobs:
         run: |
           python tools\package_fake_db_mod.py --version "${{ github.ref_name }}" --output "kcd2db_fake_db-${{ github.ref_name }}.zip"
 
+      - name: Resolve release metadata
+        id: release_meta
+        shell: pwsh
+        run: |
+          $isPrerelease = "${{ github.ref_name }}".Contains("-")
+          "prerelease=$($isPrerelease.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "make_latest=$(if ($isPrerelease) { 'false' } else { 'true' })" >> $env:GITHUB_OUTPUT
+
       - name: Generate release notes
         shell: pwsh
         env:
@@ -115,5 +123,6 @@ jobs:
             kcd2db-${{ github.REF_NAME }}.zip
             dist/kcd2db_fake_db.lua
             kcd2db_fake_db-${{ github.ref_name }}.zip
-          make_latest: true
+          prerelease: ${{ steps.release_meta.outputs.prerelease }}
+          make_latest: ${{ steps.release_meta.outputs.make_latest }}
           body_path: release-notes.md
